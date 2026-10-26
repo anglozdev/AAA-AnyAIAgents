@@ -1,0 +1,145 @@
+/* <<<<=== START: sidebar.css ===>>>> */
+/*
+ * Copyright (C) 2026 Angel Lozano (anglozdev)
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ */
+#codebridge-sidebar, #cb-diff-modal, #cb-merge-modal, #cb-sessions-modal {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+  letter-spacing: normal !important;
+  word-spacing: normal !important;
+  text-transform: none !important;
+  color: #ffffff !important;
+  box-sizing: border-box !important;
+  -webkit-font-smoothing: antialiased !important;
+}
+#codebridge-sidebar *, #cb-diff-modal *, #cb-merge-modal *, #cb-sessions-modal * {
+  font-family: inherit !important;
+  line-height: 1.35 !important;
+  letter-spacing: normal !important;
+  box-sizing: border-box !important;
+}
+#codebridge-sidebar {
+  position: fixed !important;
+  top: 10px !important;
+  left: 10px !important;
+  width: 350px !important;
+  min-width: 350px !important;
+  max-width: 350px !important;
+  height: 95vh !important;
+  max-height: 95vh !important;
+  background: #1e1e1e !important;
+  color: #fff !important;
+  z-index: 2147483640 !important;
+  border-radius: 8px !important;
+  box-shadow: 2px 0 15px rgba(0,0,0,0.6) !important;
+  border: 1px solid #333 !important;
+  display: flex;
+  flex-direction: column !important;
+  padding: 14px !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+#codebridge-sidebar h3 {
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: #4fc3f7 !important;
+}
+#codebridge-sidebar label, #codebridge-sidebar summary, #codebridge-sidebar span {
+  font-size: 12px !important;
+}
+#codebridge-sidebar button {
+  background: #4caf50;
+  color: #ffffff !important;
+  border: none !important;
+  padding: 8px 10px !important;
+  margin: 4px 0 !important;
+  cursor: pointer !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  min-height: 32px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  text-align: center !important;
+}
+#codebridge-sidebar button:disabled { 
+  background: #555 !important; 
+  color: #999 !important;
+  cursor: not-allowed !important; 
+}
+#cb-btn-close {
+  background: transparent !important;
+  color: #aaa !important;
+  font-size: 16px !important;
+  padding: 2px 6px !important;
+  margin: 0 !important;
+  min-height: auto !important;
+  width: auto !important;
+}
+#cb-btn-close:hover {
+  color: white !important;
+}
+#codebridge-sidebar textarea, #codebridge-sidebar input[type="text"], #codebridge-sidebar input[type="password"], #codebridge-sidebar select {
+  width: 100% !important; 
+  margin: 4px 0 !important; 
+  background: #333333 !important; 
+  color: #ffffff !important; 
+  border: 1px solid #555555 !important;
+  box-sizing: border-box !important;
+  padding: 6px 8px !important;
+  border-radius: 4px !important;
+  font-size: 12px !important;
+  min-height: 30px !important;
+}
+#codebridge-sidebar textarea {
+  min-height: 56px !important;
+  resize: vertical !important;
+}
+.file-list { 
+  max-height: 150px; 
+  overflow-y: auto; 
+  background: #2a2a2a; 
+  padding: 10px; 
+  margin: 10px 0; 
+  border-radius: 4px;
+}
+.file-item { 
+  display: grid;
+  grid-template-columns: 1fr auto; 
+  align-items: center; 
+  gap: 10px; 
+  margin-bottom: 8px; 
+}
+.file-name {
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 13px;
+}
+#codebridge-sidebar input[type="checkbox"], #cb-merge-modal input[type="checkbox"], #cb-sessions-modal input[type="checkbox"] {
+  appearance: checkbox !important;
+  -webkit-appearance: checkbox !important;
+  width: 14px !important;
+  height: 14px !important;
+  min-width: 14px !important;
+  min-height: 14px !important;
+  opacity: 1 !important;
+  display: inline-block !important;
+  visibility: visible !important;
+  accent-color: #4fc3f7 !important;
+  margin: 0 !important;
+  cursor: pointer !important;
+  pointer-events: auto !important;
+  position: static !important;
+}
+/* <<<<=== END: sidebar.css ===>>>> */

@@ -1,0 +1,58 @@
+{
+  "manifest_version": 3,
+  "name": "AnyAIAgents (AAA)",
+  "version": "3.0.5",
+  "description": "Multi-Agent Orchestration & Local Workspace Sync Hub for AI Coding Assistants",
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "identity",
+    "tabs",
+    "scripting",
+    "activeTab"
+  ],
+  "host_permissions": [
+    "https://gemini.google.com/*",
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://www.perplexity.ai/*",
+    "https://chat.deepseek.com/*",
+    "https://qwen.ai/*",
+    "https://chat.qwen.ai/*",
+    "https://kimi.moonshot.cn/*",
+    "https://www.kimi.ai/*",
+    "https://www.doubao.com/*",
+    "https://huggingface.co/chat/*",
+    "https://api.github.com/*",
+    "https://script.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://gemini.google.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://www.perplexity.ai/*",
+        "https://chat.deepseek.com/*",
+        "https://qwen.ai/*",
+        "https://chat.qwen.ai/*",
+        "https://kimi.moonshot.cn/*",
+        "https://www.kimi.ai/*",
+        "https://www.doubao.com/*",
+        "https://huggingface.co/chat/*"
+      ],
+      "css": ["sidebar.css"],
+      "js": ["content.js"]
+    }
+  ],
+  "action": {
+    "default_title": "AnyAIAgents (AAA)"
+  }
+}
