@@ -1,0 +1,51 @@
+# Operating System & Editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Archives, Packages & Keys
+*.zip
+*.crx
+*.pem
+*.patch
+
+# AnyAIAgents Runtime, Config & Logs
+.anyai_backups/
+.codebridge_backups/
+.anyai_session.md
+.anyai_config.json
+anyai_activity.csv
+anyai_roles.md
+anyai_snippets.md
+anyai_instructions.md
+file_list.txt
+merged_workspace*.txt
+gemini-code-*.md
+
+# Exclude all images & design assets (JPG, PNG, etc.)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.webp
+*.svg
+*.ico
+*.psd
+*.ai
+
+# Exception: Keep ONLY the 3 required Chrome Extension icons
+!icon16.png
+!icon48.png
+!icon128.png
+
+# Standalone Generator HTML tools (not part of extension package)
+generate-icons.html
+generate-store-assets.html
+
+# Node & Logs
+node_modules/
+*.log
