@@ -61,8 +61,5 @@ Since this extension requires powerful file system permissions to act as an IDE,
 To allow AAA to auto-apply code changes to your files, tell your AI to output code using strict START and END delimiters. (The extension can automatically inject this rule via the `-- Load Snippet --` dropdown).
 
 
-<img width="1732" height="1178" alt="image" src="https://github.com/user-attachments/assets/7be56a32-9657-4484-8936-b55945834392" />
-
-<img width="1758" height="975" alt="image" src="https://github.com/user-attachments/assets/21acd2b8-aaba-4c53-a7f5-8725beb9b841" />
-
+<img width="1848" height="1284" alt="image" src="https://github.com/user-attachments/assets/d7f1e77c-ec01-4303-8833-db944f5e68db" />
 

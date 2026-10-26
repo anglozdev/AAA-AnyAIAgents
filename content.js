@@ -592,7 +592,7 @@ function showCbToast(msg) {
   toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 2200);
 }
 // --------------------------------------------------------
-function formatCodeWithNumbersAndHighlight(rawText) {
+function highlightSyntaxTokensOnly(rawText) {
   const esc = (rawText || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const tokenRx = new RegExp([
     "(\\/\\*[\\s\\S]*?\\*\\/)",
@@ -601,49 +601,259 @@ function formatCodeWithNumbersAndHighlight(rawText) {
     "\\b(const|let|var|function|return|if|else|for|while|switch|case|break|continue|async|await|try|catch|finally|throw|new|class|extends|import|export|from|default|typeof|instanceof|true|false|null|undefined)\\b",
     "\\b(\\d+(?:\\.\\d+)?)\\b"
   ].join(OR_OP), "g");
-  const highlighted = esc.replace(tokenRx, (m, cMulti, cSingle, str, kw, num) => {
+  return esc.replace(tokenRx, (m, cMulti, cSingle, str, kw, num) => {
     if (cMulti || cSingle) return `<span style="color:#6a9955;font-style:italic;">${m}</span>`;
     if (str) return `<span style="color:#ce9178;">${m}</span>`;
     if (kw) return `<span style="color:#569cd6;font-weight:bold;">${m}</span>`;
     if (num) return `<span style="color:#b5cea8;">${m}</span>`;
     return m;
   });
+}
+// --------------------------------------------------------
+function formatCodeWithNumbersAndHighlight(rawText) {
+  const highlighted = highlightSyntaxTokensOnly(rawText);
   return highlighted.split('\n').map((line, idx) =>
     `<div style="display:flex;line-height:1.5;"><span style="width:42px;flex-shrink:0;color:#666;user-select:none;text-align:right;padding-right:12px;border-right:1px solid #2a2a2a;margin-right:12px;">${idx + 1}</span><span style="white-space:pre;">${line || ' '}</span></div>`
   ).join('');
 }
 // --------------------------------------------------------
-function showFilePreviewModal(filePath, fileObj, isImage, textContent) {
+async function writeWorkspaceFileDirect(filePath, newContent) {
+  const handle = fileHandles ? fileHandles[filePath] : null;
+  if (!handle) throw new Error('File handle not found in workspace');
+  const writable = await handle.createWritable();
+  await writable.write(newContent);
+  await writable.close();
+  fileSizes[filePath] = newContent.length;
+  logAndTrackFile('Editor Save', filePath);
+}
+// --------------------------------------------------------
+function buildLiveHighlightedEditorDOM(doc, initialText, onTextChange, onSaveShortcut) {
+  const wrap = doc.createElement('div');
+  wrap.style.cssText = 'display:flex;flex:1;height:70vh;background:#111;border:1px solid #0288d1;border-radius:6px;overflow:hidden;font-family:Consolas,Monaco,"Courier New",monospace;position:relative;';
+  const gutter = doc.createElement('div');
+  gutter.style.cssText = 'width:48px;background:#181818;color:#666;text-align:right;padding:12px 8px 12px 4px;border-right:1px solid #2a2a2a;user-select:none;overflow:hidden;font-size:13px;line-height:1.5;white-space:pre;flex-shrink:0;';
+  const stage = doc.createElement('div');
+  stage.style.cssText = 'position:relative;flex:1;height:100%;overflow:hidden;background:#111;';
+  const sharedFontCss = 'position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:12px;border:none;font-family:Consolas,Monaco,"Courier New",monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto;box-sizing:border-box;tab-size:2;';
+  const highlightPre = doc.createElement('pre');
+  highlightPre.style.cssText = sharedFontCss + 'color:#d4d4d4;pointer-events:none;z-index:1;background:transparent;';
+  const textarea = doc.createElement('textarea');
+  textarea.spellcheck = false;
+  textarea.value = initialText || '';
+  textarea.style.cssText = sharedFontCss + 'color:transparent;background:transparent;caret-color:#4fc3f7;resize:none;outline:none;z-index:2;';
+  const syncRender = () => {
+    const val = textarea.value;
+    highlightPre.innerHTML = highlightSyntaxTokensOnly(val) + '\n';
+    const count = val.split('\n').length;
+    let g = '';
+    for (let i = 1; i <= count; i++) g += i + '\n';
+    gutter.textContent = g;
+  };
+  syncRender();
+  textarea.addEventListener('scroll', () => {
+    highlightPre.scrollTop = textarea.scrollTop;
+    highlightPre.scrollLeft = textarea.scrollLeft;
+    gutter.scrollTop = textarea.scrollTop;
+  });
+  textarea.addEventListener('input', () => {
+    syncRender();
+    if (onTextChange) onTextChange(textarea.value);
+  });
+  textarea.addEventListener('keydown', (ev) => {
+    ev.stopPropagation();
+    if (ev.key === 'Tab') {
+      ev.preventDefault();
+      const s = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      textarea.value = textarea.value.substring(0, s) + '  ' + textarea.value.substring(end);
+      textarea.selectionStart = textarea.selectionEnd = s + 2;
+      syncRender();
+      if (onTextChange) onTextChange(textarea.value);
+    } else if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's') {
+      ev.preventDefault();
+      if (onSaveShortcut) onSaveShortcut(textarea.value);
+    }
+  });
+  stage.appendChild(highlightPre);
+  stage.appendChild(textarea);
+  wrap.appendChild(gutter);
+  wrap.appendChild(stage);
+  return { wrap, textarea, syncRender };
+}
+// --------------------------------------------------------
+function showFilePreviewModal(filePath, fileObj, isImage, textContent, startInEditMode = false) {
   const existing = document.getElementById('cb-file-preview-modal');
   if (existing) existing.remove();
   const overlay = document.createElement('div');
   overlay.id = 'cb-file-preview-modal';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.8);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
-  let bodyHtml = '';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.82);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  let currentText = textContent || '';
+  let isEditMode = Boolean(startInEditMode && !isImage);
   let blobUrl = null;
-  if (isImage && fileObj) {
-    blobUrl = URL.createObjectURL(fileObj);
-    bodyHtml = `<div style="text-align:center;padding:16px;overflow:auto;max-height:72vh;max-width:100%;"><img src="${blobUrl}" style="border-radius:6px;border:1px solid #333;" /></div>`;
-  } else {
-    const formattedHtml = formatCodeWithNumbersAndHighlight(textContent);
-    bodyHtml = `<div style="background:#111;color:#d4d4d4;padding:12px;border-radius:6px;border:1px solid #333;overflow-x:auto;overflow-y:auto;max-height:72vh;max-width:100%;font-size:12px;font-family:Consolas,Monaco,'Courier New',monospace;margin:0;">${formattedHtml}</div>`;
+  const modalBox = document.createElement('div');
+  modalBox.style.cssText = 'background:#1a1a1a;color:#e0e0e0;width:880px;max-width:95vw;max-height:92vh;border-radius:10px;border:1px solid #444;padding:16px 20px;box-shadow:0 12px 45px rgba(0,0,0,0.85);display:flex;flex-direction:column;gap:10px;';
+  const headerBar = document.createElement('div');
+  headerBar.style.cssText = 'display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;padding-bottom:10px;gap:10px;';
+  const titleWrap = document.createElement('div');
+  titleWrap.style.cssText = 'display:flex;align-items:center;gap:10px;min-width:0;';
+  const titleEl = document.createElement('div');
+  titleEl.style.cssText = 'font-weight:bold;color:#4fc3f7;font-size:14px;word-break:break-all;';
+  titleEl.textContent = `📄 ${filePath}`;
+  const statusBadge = document.createElement('span');
+  statusBadge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:4px;background:#333;color:#aaa;white-space:nowrap;';
+  statusBadge.textContent = isImage ? 'Image Preview' : (isEditMode ? '✏️ Editing (Formatted)' : 'Read-Only');
+  titleWrap.appendChild(titleEl);
+  titleWrap.appendChild(statusBadge);
+  const actionsWrap = document.createElement('div');
+  actionsWrap.style.cssText = 'display:flex;gap:8px;align-items:center;flex-shrink:0;';
+  const btnToggleEdit = document.createElement('button');
+  btnToggleEdit.style.cssText = 'background:#383838;color:#fff;border:1px solid #555;padding:5px 12px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;';
+  const btnSaveModal = document.createElement('button');
+  btnSaveModal.style.cssText = 'background:#0288d1;color:#fff;border:none;padding:5px 14px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;display:none;';
+  btnSaveModal.textContent = '💾 Save to Disk (Ctrl+S)';
+  const btnCloseModal = document.createElement('button');
+  btnCloseModal.style.cssText = 'background:#d32f2f;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;';
+  btnCloseModal.textContent = '✕ Close';
+  if (!isImage) {
+    actionsWrap.appendChild(btnToggleEdit);
+    actionsWrap.appendChild(btnSaveModal);
   }
-  overlay.innerHTML = `
-    <div style="background:#1a1a1a;color:#e0e0e0;width:760px;max-width:94vw;max-height:90vh;border-radius:10px;border:1px solid #444;padding:18px 22px;box-shadow:0 12px 45px rgba(0,0,0,0.85);display:flex;flex-direction:column;gap:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;padding-bottom:10px;">
-        <div style="font-weight:bold;color:#4fc3f7;font-size:14px;word-break:break-all;">📄 ${filePath}</div>
-        <button id="cb-close-file-preview" style="background:#d32f2f;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;">✕ Close</button>
-      </div>
-      ${bodyHtml}
-    </div>
-  `;
-  document.body.appendChild(overlay);
+  actionsWrap.appendChild(btnCloseModal);
+  headerBar.appendChild(titleWrap);
+  headerBar.appendChild(actionsWrap);
+  const bodyContainer = document.createElement('div');
+  bodyContainer.style.cssText = 'display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;';
+  let activeTextarea = null;
+  const saveCurrentEdits = async () => {
+    if (!activeTextarea) return;
+    try {
+      statusBadge.textContent = '⏳ Saving...';
+      statusBadge.style.background = '#e65100';
+      statusBadge.style.color = '#fff';
+      currentText = activeTextarea.value;
+      await writeWorkspaceFileDirect(filePath, currentText);
+      statusBadge.textContent = `✅ Saved ${new Date().toLocaleTimeString()}`;
+      statusBadge.style.background = '#2e7d32';
+      statusBadge.style.color = '#fff';
+      showCbToast(`💾 Saved ${filePath} to disk!`);
+    } catch (err) {
+      statusBadge.textContent = `❌ Save Error`;
+      statusBadge.style.background = '#c62828';
+      showCbToast(`❌ Error saving: ${err.message}`);
+    }
+  };
+  const renderBody = () => {
+    bodyContainer.innerHTML = '';
+    if (isImage && fileObj) {
+      blobUrl = URL.createObjectURL(fileObj);
+      bodyContainer.innerHTML = `<div style="text-align:center;padding:16px;overflow:auto;max-height:72vh;max-width:100%;"><img src="${blobUrl}" style="border-radius:6px;border:1px solid #333;" /></div>`;
+      return;
+    }
+    if (!isEditMode) {
+      btnToggleEdit.textContent = '✏️ Edit File';
+      btnSaveModal.style.display = 'none';
+      statusBadge.textContent = 'Read-Only';
+      statusBadge.style.background = '#333';
+      statusBadge.style.color = '#aaa';
+      const formattedHtml = formatCodeWithNumbersAndHighlight(currentText);
+      bodyContainer.innerHTML = `<div style="background:#111;color:#d4d4d4;padding:12px;border-radius:6px;border:1px solid #333;overflow-x:auto;overflow-y:auto;max-height:72vh;max-width:100%;font-size:13px;font-family:Consolas,Monaco,'Courier New',monospace;margin:0;">${formattedHtml}</div>`;
+    } else {
+      btnToggleEdit.textContent = '👁️ Read-Only View';
+      btnSaveModal.style.display = 'inline-block';
+      statusBadge.textContent = '✏️ Editing (Formatted)';
+      statusBadge.style.background = '#0277bd';
+      statusBadge.style.color = '#fff';
+      const editorObj = buildLiveHighlightedEditorDOM(
+        document,
+        currentText,
+        (updatedVal) => {
+          currentText = updatedVal;
+          statusBadge.textContent = '● Unsaved Changes';
+          statusBadge.style.background = '#e65100';
+          statusBadge.style.color = '#fff';
+        },
+        () => saveCurrentEdits()
+      );
+      activeTextarea = editorObj.textarea;
+      bodyContainer.appendChild(editorObj.wrap);
+      setTimeout(() => activeTextarea.focus(), 30);
+    }
+  };
+  btnToggleEdit.addEventListener('click', () => {
+    isEditMode = !isEditMode;
+    renderBody();
+  });
+  btnSaveModal.addEventListener('click', saveCurrentEdits);
+  btnCloseModal.addEventListener('click', () => {
+    if (blobUrl) URL.revokeObjectURL(blobUrl);
+    overlay.remove();
+  });
   overlay.addEventListener('click', (e) => {
-    if (e.target === overlay || e.target.id === 'cb-close-file-preview') {
+    if (e.target === overlay) {
       if (blobUrl) URL.revokeObjectURL(blobUrl);
       overlay.remove();
     }
   });
+  modalBox.appendChild(headerBar);
+  modalBox.appendChild(bodyContainer);
+  overlay.appendChild(modalBox);
+  document.body.appendChild(overlay);
+  renderBody();
+}
+// --------------------------------------------------------
+function populateInteractiveEditorTab(win, filePath, initialText) {
+  const doc = win.document;
+  doc.open();
+  doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Edit: ' + filePath + '</title><style>*{box-sizing:border-box;} body{margin:0;background:#121212;color:#d4d4d4;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden;} ::selection{background:rgba(2,136,209,0.45);}</style></head><body></body></html>');
+  doc.close();
+  const hdr = doc.createElement('div');
+  hdr.style.cssText = 'background:#1e1e1e;color:#4fc3f7;padding:10px 18px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;flex-shrink:0;';
+  const titleWrap = doc.createElement('div');
+  titleWrap.style.cssText = 'font-weight:bold;font-size:14px;display:flex;align-items:center;gap:10px;';
+  const titleSpan = doc.createElement('span');
+  titleSpan.textContent = '📄 ' + filePath;
+  const badge = doc.createElement('span');
+  badge.style.cssText = 'font-size:11px;padding:3px 8px;border-radius:4px;background:#0277bd;color:#fff;font-weight:normal;';
+  badge.textContent = '✏️ Live Formatted Editor';
+  titleWrap.appendChild(titleSpan);
+  titleWrap.appendChild(badge);
+  const btnSave = doc.createElement('button');
+  btnSave.style.cssText = 'background:#0288d1;color:#fff;border:none;padding:7px 16px;border-radius:5px;font-weight:bold;cursor:pointer;font-size:12px;';
+  btnSave.textContent = '💾 Save to Disk (Ctrl+S)';
+  hdr.appendChild(titleWrap);
+  hdr.appendChild(btnSave);
+  doc.body.appendChild(hdr);
+  let editorRef = null;
+  const triggerTabSave = async () => {
+    if (!editorRef) return;
+    try {
+      badge.textContent = '⏳ Saving...';
+      badge.style.background = '#e65100';
+      await writeWorkspaceFileDirect(filePath, editorRef.value);
+      badge.textContent = '✅ Saved ' + new Date().toLocaleTimeString();
+      badge.style.background = '#2e7d32';
+      showCbToast(`💾 Saved ${filePath} from editor tab!`);
+    } catch (err) {
+      badge.textContent = '❌ Error: ' + err.message;
+      badge.style.background = '#c62828';
+    }
+  };
+  const editorObj = buildLiveHighlightedEditorDOM(
+    doc,
+    initialText,
+    () => {
+      badge.textContent = '● Unsaved Changes';
+      badge.style.background = '#e65100';
+    },
+    () => triggerTabSave()
+  );
+  editorObj.wrap.style.height = 'auto';
+  editorObj.wrap.style.border = 'none';
+  editorObj.wrap.style.borderRadius = '0';
+  editorRef = editorObj.textarea;
+  btnSave.addEventListener('click', triggerTabSave);
+  doc.body.appendChild(editorObj.wrap);
+  setTimeout(() => editorRef.focus(), 50);
 }
 // --------------------------------------------------------
 function showFileActionMenu(filePath, anchorX, anchorY) {
@@ -651,16 +861,17 @@ function showFileActionMenu(filePath, anchorX, anchorY) {
   if (existing) existing.remove();
   const menu = document.createElement('div');
   menu.id = 'cb-file-action-menu';
-  const left = Math.min(anchorX, window.innerWidth - 230);
-  const top = Math.min(anchorY, window.innerHeight - 190);
-  menu.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:215px;background:#1e1e1e;color:#e0e0e0;border:1px solid #0288d1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,0.75);z-index:2147483647;padding:6px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;`;
+  const left = Math.min(anchorX, window.innerWidth - 235);
+  const top = Math.min(anchorY, window.innerHeight - 220);
+  menu.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:225px;background:#1e1e1e;color:#e0e0e0;border:1px solid #0288d1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,0.75);z-index:2147483647;padding:6px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;`;
   const btnStyle = 'display:block;width:100%;text-align:left;background:transparent;color:#e0e0e0;border:none;padding:7px 10px;border-radius:5px;cursor:pointer;font-size:12px;';
   menu.innerHTML = `
     <div style="padding:5px 8px;font-size:11px;color:#4fc3f7;font-weight:bold;border-bottom:1px solid #333;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${filePath}">${filePath}</div>
     <button data-act="copy-path" style="${btnStyle}">📋 Copy File Path</button>
     <button data-act="copy-content" style="${btnStyle}">📄 Copy File Content</button>
     <button data-act="preview-modal" style="${btnStyle}">🔍 Preview in Modal</button>
-    <button data-act="open-tab" style="${btnStyle}">↗️ Open in New Browser Tab</button>
+    <button data-act="edit-modal" style="${btnStyle}">✏️ Edit & Save in Modal</button>
+    <button data-act="open-tab" style="${btnStyle}">↗️ Open Editor in New Tab</button>
   `;
   document.body.appendChild(menu);
   menu.querySelectorAll('button').forEach(btn => {
@@ -682,10 +893,14 @@ function showFileActionMenu(filePath, anchorX, anchorY) {
         showCbToast('⚠️ File handle not found in local workspace.');
         return;
       }
+      const lower = filePath.toLowerCase();
+      const isImg = /\.(png|jpg|jpeg|gif|webp|svg|ico|bmp)$/.test(lower);
+      let preOpenedWin = null;
+      if (act === 'open-tab' && !isImg) {
+        preOpenedWin = window.open('', '_blank');
+      }
       try {
         const fileObj = await handle.getFile();
-        const lower = filePath.toLowerCase();
-        const isImg = /\.(png|jpg|jpeg|gif|webp|svg|ico|bmp)$/.test(lower);
         if (act === 'copy-content') {
           if (isImg) {
             await navigator.clipboard.writeText(fullRelativePath);
@@ -697,17 +912,19 @@ function showFileActionMenu(filePath, anchorX, anchorY) {
           }
         } else if (act === 'preview-modal') {
           const txt = isImg ? '' : await fileObj.text();
-          showFilePreviewModal(filePath, fileObj, isImg, txt);
+          showFilePreviewModal(filePath, fileObj, isImg, txt, false);
+        } else if (act === 'edit-modal') {
+          const txt = isImg ? '' : await fileObj.text();
+          showFilePreviewModal(filePath, fileObj, isImg, txt, true);
         } else if (act === 'open-tab') {
           if (isImg) {
             const blobUrl = URL.createObjectURL(fileObj);
             window.open(blobUrl, '_blank');
-          } else {
+          } else if (preOpenedWin) {
             const txt = await fileObj.text();
-            const formattedHtml = formatCodeWithNumbersAndHighlight(txt);
-            const htmlDoc = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filePath}</title><style>body{margin:0;background:#121212;color:#d4d4d4;font-family:Consolas,Monaco,'Courier New',monospace;font-size:13px;} .hdr{position:sticky;top:0;background:#1e1e1e;color:#4fc3f7;padding:10px 18px;font-family:sans-serif;font-weight:bold;border-bottom:1px solid #333;} .code{padding:14px;overflow-x:auto;}</style></head><body><div class="hdr">📄 ${filePath}</div><div class="code">${formattedHtml}</div></body></html>`;
-            const htmlBlob = new Blob([htmlDoc], { type: 'text/html;charset=utf-8' });
-            window.open(URL.createObjectURL(htmlBlob), '_blank');
+            populateInteractiveEditorTab(preOpenedWin, filePath, txt);
+          } else {
+            showCbToast('⚠️ Popup blocked by browser. Use Edit in Modal instead.');
           }
         }
       } catch (err) {
