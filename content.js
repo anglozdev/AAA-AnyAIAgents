@@ -2211,8 +2211,9 @@ function showGasManualModal() {
   const existing = document.getElementById('cb-gas-manual-modal');
   if (existing) existing.remove();
   const extId = isExtensionContextValid() ? chrome.runtime.id : 'jokpiedkiljecdpfgckncpjongbdejkn';
-  const redirectUriWithSlash = `https://${extId}.chromiumapp.org/`;
-  const redirectUriNoSlash = `https://${extId}.chromiumapp.org`;
+  const redirectUri1 = `https://${extId}.chromiumapp.org/`;
+  const redirectUri2 = `https://${extId}.chromiumapp.org`;
+  const redirectUri3 = `http://localhost/oauth2callback`;
   const overlay = document.createElement('div');
   overlay.id = 'cb-gas-manual-modal';
   overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.8);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
@@ -2223,11 +2224,24 @@ function showGasManualModal() {
         <button id="cb-close-gas-manual" style="background:#d32f2f;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;">✕ Close</button>
       </div>
       <p style="font-size:13px;color:#ccc;margin:0 0 12px 0;">To pull and push Google Apps Script projects directly from your browser, AnyAIAgents uses your own Google Cloud OAuth 2.0 Client ID (stored strictly locally in your browser).</p>
-      <h3 style="color:#81c784;font-size:14px;margin:14px 0 6px 0;">Step 1: Your Extension Redirect URIs</h3>
-      <p style="font-size:12px;color:#bbb;margin:0 0 6px 0;">You will paste this Redirect URI into Google Cloud Console in Step 5:</p>
-      <div style="background:#252525;border:1px solid #0288d1;padding:8px 12px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
-        <code style="color:#ffb74d;font-family:monospace;font-size:12px;word-break:break-all;">${redirectUriWithSlash}</code>
-        <button id="cb-copy-gas-uri" style="background:#0288d1;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;white-space:nowrap;">📋 Copy URI</button>
+      <h3 style="color:#81c784;font-size:14px;margin:14px 0 6px 0;">Step 1: Your 3 Authorized Redirect URIs</h3>
+      <p style="font-size:12px;color:#bbb;margin:0 0 6px 0;">You will add these 3 Redirect URIs into Google Cloud Console in Step 5:</p>
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
+        <div style="background:#252525;border:1px solid #0288d1;padding:6px 12px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span style="font-size:11px;color:#aaa;min-width:48px;">URI 1:</span>
+          <code style="color:#ffb74d;font-family:monospace;font-size:12px;word-break:break-all;flex:1;">${redirectUri1}</code>
+          <button class="cb-copy-uri-btn" data-uri="${redirectUri1}" style="background:#0288d1;color:#fff;border:none;padding:5px 10px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:11px;white-space:nowrap;">📋 Copy</button>
+        </div>
+        <div style="background:#252525;border:1px solid #444;padding:6px 12px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span style="font-size:11px;color:#aaa;min-width:48px;">URI 2:</span>
+          <code style="color:#ffb74d;font-family:monospace;font-size:12px;word-break:break-all;flex:1;">${redirectUri2}</code>
+          <button class="cb-copy-uri-btn" data-uri="${redirectUri2}" style="background:#383838;color:#fff;border:1px solid #555;padding:5px 10px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:11px;white-space:nowrap;">📋 Copy</button>
+        </div>
+        <div style="background:#252525;border:1px solid #444;padding:6px 12px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <span style="font-size:11px;color:#aaa;min-width:48px;">URI 3:</span>
+          <code style="color:#ffb74d;font-family:monospace;font-size:12px;word-break:break-all;flex:1;">${redirectUri3}</code>
+          <button class="cb-copy-uri-btn" data-uri="${redirectUri3}" style="background:#383838;color:#fff;border:1px solid #555;padding:5px 10px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:11px;white-space:nowrap;">📋 Copy</button>
+        </div>
       </div>
       <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 2: Create or Select a Google Cloud Project</h3>
       <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
@@ -2246,14 +2260,15 @@ function showGasManualModal() {
         <li style="margin-bottom:6px;">Click <b>Get Started</b>: enter an App name (e.g. <code>AnyAIAgents Local</code>), select your Gmail address for <b>User support email</b>, choose <b>External</b> for Audience, enter your email for Contact info, and click <b>Create / Save</b>.</li>
         <li style="margin-bottom:6px;">Go to the <b>Audience</b> tab on the left menu, scroll down to <b>Test users</b>, click <b>+ Add Users</b>, enter your own Gmail address, and click <b>Save</b>. <i>(Required while the app is in Testing mode!)</i></li>
       </ol>
-      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 5: Create OAuth Client ID &amp; Authorize Redirect URI</h3>
+      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 5: Create OAuth Client ID &amp; Add All 3 Redirect URIs</h3>
       <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
         <li style="margin-bottom:6px;">Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#4fc3f7;">APIs &amp; Services &rarr; Credentials</a> (or <b>Clients</b>), click <b>+ Create Credentials</b> at the top, and choose <b>OAuth client ID</b>.</li>
         <li style="margin-bottom:6px;"><b>Important:</b> Set <b>Application type</b> to <b>Web application</b> <i>(do NOT select Chrome Extension or Desktop app)</i>.</li>
         <li style="margin-bottom:6px;">Enter a Name (e.g. <code>AAA Web Client</code>).</li>
-        <li style="margin-bottom:6px;">Scroll down to <b>Authorized redirect URIs</b> (not JavaScript origins), click <b>+ Add URI</b>, and paste:<br>
-          <code style="color:#ffb74d;background:#252525;padding:2px 6px;border-radius:3px;">${redirectUriWithSlash}</code><br>
-          <span style="font-size:11px;color:#aaa;">(Optional: You can also add <code>${redirectUriNoSlash}</code> on a second line).</span>
+        <li style="margin-bottom:6px;">Scroll down to <b>Authorized redirect URIs</b> (not JavaScript origins), click <b>+ Add URI</b> three times, and paste the 3 URIs from Step 1:<br>
+          • <b>URIs 1:</b> <code style="color:#ffb74d;background:#252525;padding:1px 5px;border-radius:3px;">${redirectUri1}</code><br>
+          • <b>URIs 2:</b> <code style="color:#ffb74d;background:#252525;padding:1px 5px;border-radius:3px;">${redirectUri2}</code><br>
+          • <b>URIs 3:</b> <code style="color:#ffb74d;background:#252525;padding:1px 5px;border-radius:3px;">${redirectUri3}</code>
         </li>
         <li style="margin-bottom:6px;">Click the blue <b>Create</b> (or <b>Save</b>) button at the bottom of the page.</li>
       </ol>
@@ -2272,14 +2287,14 @@ function showGasManualModal() {
       overlay.remove();
     }
   });
-  const copyBtn = document.getElementById('cb-copy-gas-uri');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(redirectUriWithSlash);
-      copyBtn.textContent = '✅ Copied!';
-      setTimeout(() => { copyBtn.textContent = '📋 Copy URI'; }, 2000);
+  overlay.querySelectorAll('.cb-copy-uri-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const targetUri = btn.getAttribute('data-uri');
+      navigator.clipboard.writeText(targetUri);
+      btn.textContent = '✅ Copied!';
+      setTimeout(() => { btn.textContent = '📋 Copy'; }, 2000);
     });
-  }
+  });
 }
 document.addEventListener('click', (e) => {
   if (e.target && e.target.id === 'cb-btn-gas-manual') {
