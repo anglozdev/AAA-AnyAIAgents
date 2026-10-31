@@ -66,6 +66,3 @@ To allow AAA to auto-apply code changes to your files, tell your AI to output co
 <img width="2557" height="1223" alt="image" src="https://github.com/user-attachments/assets/2aaff528-9068-4a2d-b4a2-d2ecf3d27076" />
 
 <img width="1755" height="976" alt="image" src="https://github.com/user-attachments/assets/d5745ff3-eecf-422e-8eda-6d65ba134f2a" />
-
-
-

@@ -7,6 +7,10 @@
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+if (window.__AAA_CONTENT_SCRIPT_ACTIVE__) {
+  throw new Error("[AAA Reader] Duplicate content script injection prevented.");
+}
+window.__AAA_CONTENT_SCRIPT_ACTIVE__ = true;
 console.log("[AAA Reader] content script loaded");
 // --------------------------------------------------------
 // GLOBAL STATE & CONFIGURATION VARIABLES
@@ -2207,39 +2211,58 @@ function showGasManualModal() {
   const existing = document.getElementById('cb-gas-manual-modal');
   if (existing) existing.remove();
   const extId = isExtensionContextValid() ? chrome.runtime.id : 'jokpiedkiljecdpfgckncpjongbdejkn';
-  const redirectUri = `https://${extId}.chromiumapp.org/`;
+  const redirectUriWithSlash = `https://${extId}.chromiumapp.org/`;
+  const redirectUriNoSlash = `https://${extId}.chromiumapp.org`;
   const overlay = document.createElement('div');
   overlay.id = 'cb-gas-manual-modal';
-  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.75);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
+  overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(0,0,0,0.8);z-index:2147483647;display:flex;align-items:center;justify-content:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;';
   overlay.innerHTML = `
-    <div style="background:#181818;color:#e0e0e0;width:680px;max-width:92vw;max-height:88vh;overflow-y:auto;border-radius:10px;border:1px solid #444;padding:22px 26px;box-shadow:0 10px 40px rgba(0,0,0,0.8);line-height:1.5;">
-      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;padding-bottom:10px;margin-bottom:14px;">
-        <h2 style="color:#4fc3f7;font-size:18px;margin:0;">☁ Google Apps Script OAuth Client ID Guide</h2>
-        <button id="cb-close-gas-manual" style="background:#d32f2f;color:#fff;border:none;padding:4px 10px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;">✕ Close</button>
+    <div style="background:#181818;color:#e0e0e0;width:740px;max-width:94vw;max-height:90vh;overflow-y:auto;border-radius:10px;border:1px solid #444;padding:22px 26px;box-shadow:0 10px 40px rgba(0,0,0,0.85);line-height:1.55;">
+      <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #333;padding-bottom:10px;margin-bottom:14px;position:sticky;top:-22px;background:#181818;z-index:2;padding-top:4px;">
+        <h2 style="color:#4fc3f7;font-size:18px;margin:0;">☁ Google Apps Script OAuth Setup Guide</h2>
+        <button id="cb-close-gas-manual" style="background:#d32f2f;color:#fff;border:none;padding:5px 12px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;">✕ Close</button>
       </div>
-      <p style="font-size:13px;color:#ccc;margin:0 0 12px 0;">To pull and push Google Apps Script projects directly from your browser, AnyAIAgents uses your own Google Cloud OAuth Client ID (stored strictly locally on your device).</p>
-      <h3 style="color:#81c784;font-size:14px;margin:14px 0 6px 0;">Step 1: Copy Your Extension Redirect URI</h3>
-      <div style="background:#252525;border:1px solid #0288d1;padding:8px 12px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;">
-        <code style="color:#ffb74d;font-family:monospace;font-size:12px;word-break:break-all;">${redirectUri}</code>
+      <p style="font-size:13px;color:#ccc;margin:0 0 12px 0;">To pull and push Google Apps Script projects directly from your browser, AnyAIAgents uses your own Google Cloud OAuth 2.0 Client ID (stored strictly locally in your browser).</p>
+      <h3 style="color:#81c784;font-size:14px;margin:14px 0 6px 0;">Step 1: Your Extension Redirect URIs</h3>
+      <p style="font-size:12px;color:#bbb;margin:0 0 6px 0;">You will paste this Redirect URI into Google Cloud Console in Step 5:</p>
+      <div style="background:#252525;border:1px solid #0288d1;padding:8px 12px;border-radius:6px;display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;">
+        <code style="color:#ffb74d;font-family:monospace;font-size:12px;word-break:break-all;">${redirectUriWithSlash}</code>
         <button id="cb-copy-gas-uri" style="background:#0288d1;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-weight:bold;font-size:12px;white-space:nowrap;">📋 Copy URI</button>
       </div>
-      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 2: Enable the Google Apps Script API</h3>
+      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 2: Create or Select a Google Cloud Project</h3>
       <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
-        <li style="margin-bottom:6px;">Open <a href="https://console.cloud.google.com/apis/library/script.googleapis.com" target="_blank" style="color:#4fc3f7;">Google Cloud Console - Apps Script API Library</a> and click <b>Enable</b>.</li>
-        <li style="margin-bottom:6px;">Open <a href="https://script.google.com/home/usersettings" target="_blank" style="color:#4fc3f7;">script.google.com/home/usersettings</a> and switch <b>Google Apps Script API</b> to <b>ON</b>.</li>
+        <li style="margin-bottom:6px;">Open the <a href="https://console.cloud.google.com/projectcreate" target="_blank" style="color:#4fc3f7;">Google Cloud Console - Create Project</a> page.</li>
+        <li style="margin-bottom:6px;">Enter a <b>Project name</b> (e.g., <code>AnyAIAgents-Sync</code>) and click <b>Create</b>.</li>
+        <li style="margin-bottom:6px;">Make sure your new project is selected in the top-left project dropdown bar of Google Cloud Console.</li>
       </ol>
-      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 3: Configure OAuth Consent Screen</h3>
+      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 3: Enable the Google Apps Script API (Both Switches)</h3>
       <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
-        <li style="margin-bottom:6px;">Go to <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" style="color:#4fc3f7;">APIs &amp; Services &rarr; OAuth consent screen</a>.</li>
-        <li style="margin-bottom:6px;">Choose <b>External</b> (or Internal), enter an app name (e.g. <code>AnyAIAgents Local</code>) and your email, and Save.</li>
-        <li style="margin-bottom:6px;">Under <b>Audience / Test users</b>, click <b>+ Add Users</b> and add your own Gmail address.</li>
+        <li style="margin-bottom:6px;"><b>Project API Switch:</b> Open <a href="https://console.cloud.google.com/apis/library/script.googleapis.com" target="_blank" style="color:#4fc3f7;">Google Cloud - Apps Script API Library</a> and click the blue <b>Enable</b> button.</li>
+        <li style="margin-bottom:6px;"><b>Account Global Switch:</b> Open <a href="https://script.google.com/home/usersettings" target="_blank" style="color:#4fc3f7;">script.google.com/home/usersettings</a>, click <b>Google Apps Script API</b>, and switch the toggle to <b>ON</b>.</li>
       </ol>
-      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 4: Create Your OAuth Client ID</h3>
+      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 4: Configure the OAuth Consent Screen &amp; Test Users</h3>
       <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
-        <li style="margin-bottom:6px;">Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#4fc3f7;">APIs &amp; Services &rarr; Credentials</a> and click <b>+ Create Credentials &rarr; OAuth client ID</b>.</li>
-        <li style="margin-bottom:6px;">Select Application type: <b>Web application</b>.</li>
-        <li style="margin-bottom:6px;">Under <b>Authorized redirect URIs</b>, click <b>+ Add URI</b> and paste the Redirect URI from Step 1.</li>
-        <li style="margin-bottom:6px;">Click <b>Create</b>, copy the <b>Client ID</b> (ending in <code>.apps.googleusercontent.com</code>), and paste it into the <b>Google OAuth Client ID</b> box in the sidebar!</li>
+        <li style="margin-bottom:6px;">Go to <a href="https://console.cloud.google.com/apis/credentials/consent" target="_blank" style="color:#4fc3f7;">APIs &amp; Services &rarr; OAuth consent screen</a> (or <b>Google Auth Platform &rarr; Overview</b>).</li>
+        <li style="margin-bottom:6px;">Click <b>Get Started</b>: enter an App name (e.g. <code>AnyAIAgents Local</code>), select your Gmail address for <b>User support email</b>, choose <b>External</b> for Audience, enter your email for Contact info, and click <b>Create / Save</b>.</li>
+        <li style="margin-bottom:6px;">Go to the <b>Audience</b> tab on the left menu, scroll down to <b>Test users</b>, click <b>+ Add Users</b>, enter your own Gmail address, and click <b>Save</b>. <i>(Required while the app is in Testing mode!)</i></li>
+      </ol>
+      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 5: Create OAuth Client ID &amp; Authorize Redirect URI</h3>
+      <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
+        <li style="margin-bottom:6px;">Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" style="color:#4fc3f7;">APIs &amp; Services &rarr; Credentials</a> (or <b>Clients</b>), click <b>+ Create Credentials</b> at the top, and choose <b>OAuth client ID</b>.</li>
+        <li style="margin-bottom:6px;"><b>Important:</b> Set <b>Application type</b> to <b>Web application</b> <i>(do NOT select Chrome Extension or Desktop app)</i>.</li>
+        <li style="margin-bottom:6px;">Enter a Name (e.g. <code>AAA Web Client</code>).</li>
+        <li style="margin-bottom:6px;">Scroll down to <b>Authorized redirect URIs</b> (not JavaScript origins), click <b>+ Add URI</b>, and paste:<br>
+          <code style="color:#ffb74d;background:#252525;padding:2px 6px;border-radius:3px;">${redirectUriWithSlash}</code><br>
+          <span style="font-size:11px;color:#aaa;">(Optional: You can also add <code>${redirectUriNoSlash}</code> on a second line).</span>
+        </li>
+        <li style="margin-bottom:6px;">Click the blue <b>Create</b> (or <b>Save</b>) button at the bottom of the page.</li>
+      </ol>
+      <h3 style="color:#81c784;font-size:14px;margin:16px 0 6px 0;">Step 6: Paste Client ID &amp; Script ID into AnyAIAgents</h3>
+      <ol style="font-size:13px;color:#ccc;padding-left:20px;margin:0;">
+        <li style="margin-bottom:6px;">Copy the generated <b>Client ID</b> (it ends in <code>.apps.googleusercontent.com</code>).</li>
+        <li style="margin-bottom:6px;">In the AnyAIAgents sidebar under <b>☁ Google Apps Script</b>, click inside the <b>Google OAuth Client ID</b> box, press <b>Ctrl+A</b> then <b>Backspace</b> to clear any old hidden characters, and paste your new Client ID.</li>
+        <li style="margin-bottom:6px;">Find your project's <b>Script ID</b> (open your Apps Script project &rarr; ⚙️ <b>Project Settings</b> &rarr; copy <b>Script ID</b>) and paste it into the <b>Script ID</b> box.</li>
+        <li style="margin-bottom:4px;">Click <b>⬇ Pull GAS</b>. In the Google popup window, sign in with your test Gmail account, click <b>Continue</b> (or <b>Advanced &rarr; Go to AnyAIAgents Local (unsafe)</b>), and approve access!</li>
       </ol>
     </div>
   `;
@@ -2252,7 +2275,7 @@ function showGasManualModal() {
   const copyBtn = document.getElementById('cb-copy-gas-uri');
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(redirectUri);
+      navigator.clipboard.writeText(redirectUriWithSlash);
       copyBtn.textContent = '✅ Copied!';
       setTimeout(() => { copyBtn.textContent = '📋 Copy URI'; }, 2000);
     });
@@ -2285,10 +2308,15 @@ function getGasToken() {
   });
 }
 // --------------------------------------------------------
+let isGasSyncInProgress = false;
 async function pullFromGAS() {
+  if (isGasSyncInProgress) return;
   if (!directoryHandle) return statusDiv.textContent = "❌ Select a workspace/folder first.";
   const scriptId = document.getElementById('cb-script-id').value.trim();
   if (!scriptId) return statusDiv.textContent = "Missing GAS Script ID.";
+  isGasSyncInProgress = true;
+  const pullBtn = document.getElementById('cb-btn-pull-gas');
+  if (pullBtn) pullBtn.disabled = true;
   statusDiv.textContent = "Authenticating with Google...";
   try {
     const token = await getGasToken();
@@ -2317,6 +2345,9 @@ async function pullFromGAS() {
     statusDiv.textContent = `✅ Pulled ${data.files.length} GAS files!`;
   } catch (e) {
     statusDiv.textContent = `❌ GAS Pull Error: ${e.message}`;
+  } finally {
+    isGasSyncInProgress = false;
+    if (pullBtn) pullBtn.disabled = false;
   }
 }
 // --------------------------------------------------------
