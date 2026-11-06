@@ -404,7 +404,7 @@ sidebar.innerHTML = [
   '  <summary style="cursor:pointer; font-size: 13px; font-weight: bold;">☁ Google Apps Script</summary>',
   '  <div style="margin-top: 8px; font-size: 12px;">',
   '    <div style="display: flex; gap: 5px; align-items: center; margin-bottom: 4px;">',
-  '      <input type="password" id="cb-gas-client-id" placeholder="Google OAuth Client ID (...apps.googleusercontent.com)" style="flex: 1; margin: 0 !important;">',
+  '      <input type="text" id="cb-gas-client-id" placeholder="Google OAuth Client ID (...apps.googleusercontent.com)" style="flex: 1; margin: 0 !important;">',
   '      <button id="cb-btn-gas-manual" title="How to get your Google OAuth Client ID" style="background: #0288d1; font-size: 11px !important; padding: 6px 8px !important; margin: 0 !important; white-space: nowrap;">❓ Guide</button>',
   '    </div>',
   '    <input type="text" id="cb-script-id" placeholder="Script ID (linked to workspace)">',
@@ -1120,15 +1120,13 @@ btnPower.addEventListener('click', () => {
 // WORKSPACE CONFIG & SECURE TOKEN ENGINE
 // --------------------------------------------------------
 let configSaveTimeout = null;
-async function syncGitTokenUI() {
+async function syncGitTokenUI(preserveLoadedGasId = false) {
   if (!isExtensionContextValid()) return;
   try {
     if (!chrome.storage ? true : !chrome.storage.local) return;
     const wsGitKey = directoryHandle ? `git_token_ws_${directoryHandle.name}` : null;
-    const wsGasKey = directoryHandle ? `gas_client_id_ws_${directoryHandle.name}` : null;
     const keysToFetch = ["global_git_token", "global_gas_client_id"];
     if (wsGitKey) keysToFetch.push(wsGitKey);
-    if (wsGasKey) keysToFetch.push(wsGasKey);
     const data = await chrome.storage.local.get(keysToFetch);
     const tokenEl = document.getElementById('cb-git-token');
     if (tokenEl) {
@@ -1137,10 +1135,8 @@ async function syncGitTokenUI() {
       else tokenEl.value = "";
     }
     const gasClientEl = document.getElementById('cb-gas-client-id');
-    if (gasClientEl) {
-      if (wsGasKey && data[wsGasKey]) gasClientEl.value = data[wsGasKey];
-      else if (data.global_gas_client_id) gasClientEl.value = data.global_gas_client_id;
-      else gasClientEl.value = "";
+    if (gasClientEl && !preserveLoadedGasId) {
+      if (data.global_gas_client_id) gasClientEl.value = data.global_gas_client_id;
     }
   } catch (e) {}
 }
@@ -1162,6 +1158,13 @@ async function loadWorkspaceConfig() {
   }
   const scriptEl = document.getElementById('cb-script-id');
   if (scriptEl) scriptEl.value = config['cb-script-id'] ? config['cb-script-id'] : "";
+  const gasClientEl = document.getElementById('cb-gas-client-id');
+  const fileGasId = config['cb-gas-client-id'] ? config['cb-gas-client-id'].trim() : (config.gasClientId ? config.gasClientId.trim() : "");
+  if (fileGasId) {
+    if (gasClientEl) gasClientEl.value = fileGasId;
+  } else if (gasClientEl && gasClientEl.value.trim()) {
+    setTimeout(() => saveWorkspaceConfig(), 200);
+  }
   const inputs = ['cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
   inputs.forEach(id => {
     const el = document.getElementById(id);
@@ -1219,7 +1222,7 @@ async function saveWorkspaceConfig() {
   } catch (e) {}
   if (!directoryHandle) return;
   const config = {};
-  const inputs = ['cb-script-id', 'cb-git-repo', 'cb-git-branch', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
+  const inputs = ['cb-script-id', 'cb-gas-client-id', 'cb-git-repo', 'cb-git-branch', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
   inputs.forEach(id => {
     const el = document.getElementById(id);
     if (el) config[id] = el.value;
@@ -2313,6 +2316,11 @@ function getGasToken() {
       return;
     }
     if (isExtensionContextValid()) {
+      if (chrome.storage && chrome.storage.local) {
+        const payload = { global_gas_client_id: clientId };
+        if (directoryHandle) payload[`gas_client_id_ws_${directoryHandle.name}`] = clientId;
+        chrome.storage.local.set(payload).catch(() => {});
+      }
       chrome.runtime.sendMessage({ action: "get_gas_token", clientId: clientId }, (res) => {
         if (res && res.success) resolve(res.token);
         else reject(new Error(res && res.error ? res.error : "Authentication failed. Check your Google OAuth Client ID."));
@@ -2323,11 +2331,20 @@ function getGasToken() {
   });
 }
 // --------------------------------------------------------
+function extractCleanGasScriptId(rawInput) {
+  let s = (rawInput || "").trim();
+  const urlMatch = s.match(/\/projects\/([a-zA-Z0-9_-]{45,65})/);
+  if (urlMatch) return urlMatch[1];
+  return s;
+}
+// --------------------------------------------------------
 let isGasSyncInProgress = false;
 async function pullFromGAS() {
   if (isGasSyncInProgress) return;
   if (!directoryHandle) return statusDiv.textContent = "❌ Select a workspace/folder first.";
-  const scriptId = document.getElementById('cb-script-id').value.trim();
+  const scriptInputEl = document.getElementById('cb-script-id');
+  const scriptId = extractCleanGasScriptId(scriptInputEl ? scriptInputEl.value : "");
+  if (scriptInputEl && scriptInputEl.value.trim() !== scriptId) scriptInputEl.value = scriptId;
   if (!scriptId) return statusDiv.textContent = "Missing GAS Script ID.";
   isGasSyncInProgress = true;
   const pullBtn = document.getElementById('cb-btn-pull-gas');
@@ -2339,7 +2356,11 @@ async function pullFromGAS() {
     const res = await fetch(`https://script.googleapis.com/v1/projects/${scriptId}/content`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const errMsg = errData.error && errData.error.message ? errData.error.message : (res.statusText || "Invalid Script ID or API request.");
+      throw new Error(`HTTP ${res.status}: ${errMsg}`);
+    }
     const data = await res.json();
     if (!data.files) throw new Error("No files found in GAS project.");
     for (const file of data.files) {

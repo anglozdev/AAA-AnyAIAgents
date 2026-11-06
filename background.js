@@ -80,91 +80,99 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
         sendResponse({ success: true });
         return true;
     }
-    // GOOGLE OAUTH 2.0 TOKEN FETCHER (POPUP WINDOW INTERCEPTOR - BYPASSES IDENTITY LOCK)
+    // GOOGLE OAUTH 2.0 TOKEN FETCHER (POPUP INTERCEPTOR + PERSISTENT STORAGE CACHE)
     if (req.action === "get_gas_token") {
         const clientId = req.clientId ? req.clientId.trim() : "";
         if (!clientId) {
             sendResponse({ success: false, error: "Missing Google OAuth Client ID." });
             return true;
         }
-        if (globalThis.cachedGasToken && globalThis.cachedGasClientId === clientId && Date.now() < globalThis.cachedGasExpiry) {
-            sendResponse({ success: true, token: globalThis.cachedGasToken });
-            return true;
-        }
-        if (!globalThis.pendingGasAuthCallbacks) {
-            globalThis.pendingGasAuthCallbacks = [];
-        }
-        globalThis.pendingGasAuthCallbacks.push(sendResponse);
-        if (globalThis.isAuthFlowActive && globalThis.activeAuthWindowId) {
-            chrome.windows.update(globalThis.activeAuthWindowId, { focused: true }).catch(() => {});
-            return true;
-        }
-        globalThis.isAuthFlowActive = true;
-        const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
-        const scope = encodeURIComponent("https://www.googleapis.com/auth/script.projects");
-        const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}&prompt=consent`;
-        let authTabId = null;
-        let authWindowId = null;
-        let isResolved = false;
-        const cleanupAndResolve = (payload) => {
-            if (isResolved) return;
-            isResolved = true;
-            globalThis.isAuthFlowActive = false;
-            globalThis.activeAuthWindowId = null;
-            chrome.tabs.onUpdated.removeListener(onTabUpdated);
-            chrome.tabs.onRemoved.removeListener(onTabRemoved);
-            const callbacks = globalThis.pendingGasAuthCallbacks.splice(0);
-            callbacks.forEach(cb => {
-                try { cb(payload); } catch (err) {}
-            });
-        };
-        const onTabUpdated = (tabId, changeInfo, tab) => {
-            if (tabId !== authTabId && (!tab || tab.windowId !== authWindowId)) return;
-            const currentUrl = changeInfo.url || (tab && tab.url) || "";
-            if (!currentUrl.startsWith(redirectUri)) return;
-            chrome.tabs.remove(tabId).catch(() => {});
-            try {
-                const hashIndex = currentUrl.indexOf('#');
-                const queryIndex = currentUrl.indexOf('?');
-                const rawParams = hashIndex !== -1 ? currentUrl.substring(hashIndex + 1) : (queryIndex !== -1 ? currentUrl.substring(queryIndex + 1) : "");
-                const params = new URLSearchParams(rawParams);
-                const errParam = params.get('error');
-                if (errParam) {
-                    cleanupAndResolve({ success: false, error: `Google OAuth error: ${errParam}` });
-                    return;
-                }
-                const accessToken = params.get('access_token');
-                const expiresIn = parseInt(params.get('expires_in') || "3600", 10);
-                if (!accessToken) {
-                    cleanupAndResolve({ success: false, error: "No access_token returned in redirect URI." });
-                    return;
-                }
-                globalThis.cachedGasToken = accessToken;
-                globalThis.cachedGasClientId = clientId;
-                globalThis.cachedGasExpiry = Date.now() + (expiresIn - 60) * 1000;
-                cleanupAndResolve({ success: true, token: accessToken });
-            } catch (e) {
-                cleanupAndResolve({ success: false, error: e.message });
-            }
-        };
-        const onTabRemoved = (tabId) => {
-            if (tabId === authTabId && !isResolved) {
-                cleanupAndResolve({ success: false, error: "OAuth popup window was closed before completing sign-in." });
-            }
-        };
-        chrome.tabs.onUpdated.addListener(onTabUpdated);
-        chrome.tabs.onRemoved.addListener(onTabRemoved);
-        chrome.windows.create({ url: authUrl, type: "popup", width: 540, height: 660, focused: true }, (win) => {
-            if (chrome.runtime.lastError || !win) {
-                const errMsg = chrome.runtime.lastError ? chrome.runtime.lastError.message : "Failed to open OAuth popup window.";
-                cleanupAndResolve({ success: false, error: errMsg });
+        chrome.storage.local.get(["cached_gas_token", "cached_gas_client_id", "cached_gas_expiry"], (stored) => {
+            if (stored.cached_gas_token && stored.cached_gas_client_id === clientId && Date.now() < (stored.cached_gas_expiry || 0)) {
+                sendResponse({ success: true, token: stored.cached_gas_token });
                 return;
             }
-            authWindowId = win.id;
-            globalThis.activeAuthWindowId = win.id;
-            if (win.tabs && win.tabs.length > 0) {
-                authTabId = win.tabs[0].id;
+            if (!globalThis.pendingGasAuthCallbacks) {
+                globalThis.pendingGasAuthCallbacks = [];
             }
+            globalThis.pendingGasAuthCallbacks.push(sendResponse);
+            if (globalThis.isAuthFlowActive && globalThis.activeAuthWindowId) {
+                chrome.windows.update(globalThis.activeAuthWindowId, { focused: true }).catch(() => {});
+                return;
+            }
+            globalThis.isAuthFlowActive = true;
+            const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
+            const scope = encodeURIComponent("https://www.googleapis.com/auth/script.projects");
+            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+            let authTabId = null;
+            let authWindowId = null;
+            let isResolved = false;
+            const cleanupAndResolve = (payload) => {
+                if (isResolved) return;
+                isResolved = true;
+                globalThis.isAuthFlowActive = false;
+                globalThis.activeAuthWindowId = null;
+                chrome.tabs.onUpdated.removeListener(onTabUpdated);
+                chrome.tabs.onRemoved.removeListener(onTabRemoved);
+                const callbacks = globalThis.pendingGasAuthCallbacks.splice(0);
+                callbacks.forEach(cb => {
+                    try { cb(payload); } catch (err) {}
+                });
+            };
+            const onTabUpdated = (tabId, changeInfo, tab) => {
+                if (tabId !== authTabId && (!tab || tab.windowId !== authWindowId)) return;
+                const currentUrl = changeInfo.url || (tab && tab.url) || "";
+                if (!currentUrl.startsWith(redirectUri)) return;
+                chrome.tabs.remove(tabId).catch(() => {});
+                try {
+                    const hashIndex = currentUrl.indexOf('#');
+                    const queryIndex = currentUrl.indexOf('?');
+                    const rawParams = hashIndex !== -1 ? currentUrl.substring(hashIndex + 1) : (queryIndex !== -1 ? currentUrl.substring(queryIndex + 1) : "");
+                    const params = new URLSearchParams(rawParams);
+                    const errParam = params.get('error');
+                    if (errParam) {
+                        cleanupAndResolve({ success: false, error: `Google OAuth error: ${errParam}` });
+                        return;
+                    }
+                    const accessToken = params.get('access_token');
+                    const expiresIn = parseInt(params.get('expires_in') || "3600", 10);
+                    if (!accessToken) {
+                        cleanupAndResolve({ success: false, error: "No access_token returned in redirect URI." });
+                        return;
+                    }
+                    const expiryTime = Date.now() + (expiresIn - 60) * 1000;
+                    chrome.storage.local.set({
+                        cached_gas_token: accessToken,
+                        cached_gas_client_id: clientId,
+                        cached_gas_expiry: expiryTime
+                    }).catch(() => {});
+                    cleanupAndResolve({ success: true, token: accessToken });
+                } catch (e) {
+                    cleanupAndResolve({ success: false, error: e.message });
+                }
+            };
+            const onTabRemoved = (tabId) => {
+                if (tabId === authTabId && !isResolved) {
+                    cleanupAndResolve({
+                        success: false,
+                        error: `OAuth failed/closed. Sent redirect_uri=${redirectUri} | client_id=${clientId.substring(0, 14)}...`
+                    });
+                }
+            };
+            chrome.tabs.onUpdated.addListener(onTabUpdated);
+            chrome.tabs.onRemoved.addListener(onTabRemoved);
+            chrome.windows.create({ url: authUrl, type: "popup", width: 540, height: 660, focused: true }, (win) => {
+                if (chrome.runtime.lastError || !win) {
+                    const errMsg = chrome.runtime.lastError ? chrome.runtime.lastError.message : "Failed to open OAuth popup window.";
+                    cleanupAndResolve({ success: false, error: errMsg });
+                    return;
+                }
+                authWindowId = win.id;
+                globalThis.activeAuthWindowId = win.id;
+                if (win.tabs && win.tabs.length > 0) {
+                    authTabId = win.tabs[0].id;
+                }
+            });
         });
         return true;
     }
