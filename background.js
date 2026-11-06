@@ -80,17 +80,54 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
         sendResponse({ success: true });
         return true;
     }
-    // GOOGLE OAUTH 2.0 TOKEN FETCHER (POPUP INTERCEPTOR + PERSISTENT STORAGE CACHE)
+    // GOOGLE OAUTH 2.0 TOKEN FETCHER (SILENT REFRESH TOKEN + POPUP FALLBACK)
     if (req.action === "get_gas_token") {
         const clientId = req.clientId ? req.clientId.trim() : "";
+        const reqSecret = req.clientSecret ? req.clientSecret.trim() : "";
         if (!clientId) {
             sendResponse({ success: false, error: "Missing Google OAuth Client ID." });
             return true;
         }
-        chrome.storage.local.get(["cached_gas_token", "cached_gas_client_id", "cached_gas_expiry"], (stored) => {
+        chrome.storage.local.get([
+            "cached_gas_token",
+            "cached_gas_client_id",
+            "cached_gas_expiry",
+            "cached_gas_refresh_token",
+            "global_gas_client_secret"
+        ], async (stored) => {
+            const clientSecret = reqSecret || (stored.global_gas_client_secret ? stored.global_gas_client_secret.trim() : "");
             if (stored.cached_gas_token && stored.cached_gas_client_id === clientId && Date.now() < (stored.cached_gas_expiry || 0)) {
                 sendResponse({ success: true, token: stored.cached_gas_token });
                 return;
+            }
+            // SILENT BACKGROUND REFRESH IF REFRESH_TOKEN & CLIENT_SECRET ARE AVAILABLE
+            if (stored.cached_gas_refresh_token && stored.cached_gas_client_id === clientId && clientSecret) {
+                try {
+                    const refreshRes = await fetch("https://oauth2.googleapis.com/token", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                        body: new URLSearchParams({
+                            client_id: clientId,
+                            client_secret: clientSecret,
+                            refresh_token: stored.cached_gas_refresh_token,
+                            grant_type: "refresh_token"
+                        }).toString()
+                    });
+                    if (refreshRes.ok) {
+                        const tokenData = await refreshRes.json();
+                        if (tokenData.access_token) {
+                            const expiresIn = parseInt(tokenData.expires_in || "3600", 10);
+                            const expiryTime = Date.now() + (expiresIn - 60) * 1000;
+                            await chrome.storage.local.set({
+                                cached_gas_token: tokenData.access_token,
+                                cached_gas_client_id: clientId,
+                                cached_gas_expiry: expiryTime
+                            });
+                            sendResponse({ success: true, token: tokenData.access_token });
+                            return;
+                        }
+                    }
+                } catch (e) {}
             }
             if (!globalThis.pendingGasAuthCallbacks) {
                 globalThis.pendingGasAuthCallbacks = [];
@@ -103,7 +140,10 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
             globalThis.isAuthFlowActive = true;
             const redirectUri = `https://${chrome.runtime.id}.chromiumapp.org/`;
             const scope = encodeURIComponent("https://www.googleapis.com/auth/script.projects");
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
+            const useCodeFlow = Boolean(clientSecret);
+            const authUrl = useCodeFlow
+                ? `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=code&access_type=offline&prompt=consent&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`
+                : `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&response_type=token&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scope}`;
             let authTabId = null;
             let authWindowId = null;
             let isResolved = false;
@@ -119,7 +159,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
                     try { cb(payload); } catch (err) {}
                 });
             };
-            const onTabUpdated = (tabId, changeInfo, tab) => {
+            const onTabUpdated = async (tabId, changeInfo, tab) => {
                 if (tabId !== authTabId && (!tab || tab.windowId !== authWindowId)) return;
                 const currentUrl = changeInfo.url || (tab && tab.url) || "";
                 if (!currentUrl.startsWith(redirectUri)) return;
@@ -127,25 +167,61 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
                 try {
                     const hashIndex = currentUrl.indexOf('#');
                     const queryIndex = currentUrl.indexOf('?');
-                    const rawParams = hashIndex !== -1 ? currentUrl.substring(hashIndex + 1) : (queryIndex !== -1 ? currentUrl.substring(queryIndex + 1) : "");
+                    const rawParams = queryIndex !== -1 ? currentUrl.substring(queryIndex + 1).split('#')[0] : (hashIndex !== -1 ? currentUrl.substring(hashIndex + 1) : "");
                     const params = new URLSearchParams(rawParams);
                     const errParam = params.get('error');
                     if (errParam) {
                         cleanupAndResolve({ success: false, error: `Google OAuth error: ${errParam}` });
                         return;
                     }
-                    const accessToken = params.get('access_token');
-                    const expiresIn = parseInt(params.get('expires_in') || "3600", 10);
+                    if (useCodeFlow && params.get('code')) {
+                        const authCode = params.get('code');
+                        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                            body: new URLSearchParams({
+                                code: authCode,
+                                client_id: clientId,
+                                client_secret: clientSecret,
+                                redirect_uri: redirectUri,
+                                grant_type: "authorization_code"
+                            }).toString()
+                        });
+                        const tokenData = await tokenRes.json().catch(() => ({}));
+                        if (!tokenRes.ok || !tokenData.access_token) {
+                            cleanupAndResolve({
+                                success: false,
+                                error: `Token exchange failed: ${tokenData.error_description || tokenData.error || tokenRes.statusText}`
+                            });
+                            return;
+                        }
+                        const expiresIn = parseInt(tokenData.expires_in || "3600", 10);
+                        const expiryTime = Date.now() + (expiresIn - 60) * 1000;
+                        const toSave = {
+                            cached_gas_token: tokenData.access_token,
+                            cached_gas_client_id: clientId,
+                            cached_gas_expiry: expiryTime
+                        };
+                        if (tokenData.refresh_token) {
+                            toSave.cached_gas_refresh_token = tokenData.refresh_token;
+                        }
+                        await chrome.storage.local.set(toSave);
+                        cleanupAndResolve({ success: true, token: tokenData.access_token });
+                        return;
+                    }
+                    const hashParams = new URLSearchParams(hashIndex !== -1 ? currentUrl.substring(hashIndex + 1) : rawParams);
+                    const accessToken = hashParams.get('access_token');
+                    const expiresIn = parseInt(hashParams.get('expires_in') || "3600", 10);
                     if (!accessToken) {
-                        cleanupAndResolve({ success: false, error: "No access_token returned in redirect URI." });
+                        cleanupAndResolve({ success: false, error: "No access_token or code returned in redirect URI." });
                         return;
                     }
                     const expiryTime = Date.now() + (expiresIn - 60) * 1000;
-                    chrome.storage.local.set({
+                    await chrome.storage.local.set({
                         cached_gas_token: accessToken,
                         cached_gas_client_id: clientId,
                         cached_gas_expiry: expiryTime
-                    }).catch(() => {});
+                    });
                     cleanupAndResolve({ success: true, token: accessToken });
                 } catch (e) {
                     cleanupAndResolve({ success: false, error: e.message });

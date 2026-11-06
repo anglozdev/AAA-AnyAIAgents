@@ -407,6 +407,7 @@ sidebar.innerHTML = [
   '      <input type="text" id="cb-gas-client-id" placeholder="Google OAuth Client ID (...apps.googleusercontent.com)" style="flex: 1; margin: 0 !important;">',
   '      <button id="cb-btn-gas-manual" title="How to get your Google OAuth Client ID" style="background: #0288d1; font-size: 11px !important; padding: 6px 8px !important; margin: 0 !important; white-space: nowrap;">❓ Guide</button>',
   '    </div>',
+  '    <input type="password" id="cb-gas-client-secret" placeholder="Google OAuth Client Secret (GOCSPX-... for zero-popup refresh)">',
   '    <input type="text" id="cb-script-id" placeholder="Script ID (linked to workspace)">',
   '    <div style="display: flex; gap: 5px; margin-bottom: 5px;">',
   '      <button id="cb-btn-pull-gas" style="flex: 1; font-size: 11px; padding: 6px;">⬇ Pull GAS</button>',
@@ -1125,7 +1126,7 @@ async function syncGitTokenUI(preserveLoadedGasId = false) {
   try {
     if (!chrome.storage ? true : !chrome.storage.local) return;
     const wsGitKey = directoryHandle ? `git_token_ws_${directoryHandle.name}` : null;
-    const keysToFetch = ["global_git_token", "global_gas_client_id"];
+    const keysToFetch = ["global_git_token", "global_gas_client_id", "global_gas_client_secret"];
     if (wsGitKey) keysToFetch.push(wsGitKey);
     const data = await chrome.storage.local.get(keysToFetch);
     const tokenEl = document.getElementById('cb-git-token');
@@ -1137,6 +1138,10 @@ async function syncGitTokenUI(preserveLoadedGasId = false) {
     const gasClientEl = document.getElementById('cb-gas-client-id');
     if (gasClientEl && !preserveLoadedGasId) {
       if (data.global_gas_client_id) gasClientEl.value = data.global_gas_client_id;
+    }
+    const gasSecretEl = document.getElementById('cb-gas-client-secret');
+    if (gasSecretEl) {
+      if (data.global_gas_client_secret) gasSecretEl.value = data.global_gas_client_secret;
     }
   } catch (e) {}
 }
@@ -1215,6 +1220,11 @@ async function saveWorkspaceConfig() {
         payload["global_gas_client_id"] = gasClientId;
         if (directoryHandle) payload[`gas_client_id_ws_${directoryHandle.name}`] = gasClientId;
       }
+      const gasSecretEl = document.getElementById('cb-gas-client-secret');
+      const gasClientSecret = gasSecretEl ? gasSecretEl.value.trim() : "";
+      if (gasClientSecret) {
+        payload["global_gas_client_secret"] = gasClientSecret;
+      }
       if (Object.keys(payload).length > 0) {
         chrome.storage.local.set(payload).catch(() => {});
       }
@@ -1244,7 +1254,7 @@ document.body.addEventListener('input', (e) => {
   if (e.target.id === 'cb-file-filter') {
     applyLiveWorkspaceFilter(false);
   }
-  const targets = ['cb-script-id', 'cb-gas-client-id', 'cb-git-token', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
+  const targets = ['cb-script-id', 'cb-gas-client-id', 'cb-gas-client-secret', 'cb-git-token', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
   if (targets.includes(e.target.id)) {
     clearTimeout(configSaveTimeout);
     configSaveTimeout = setTimeout(() => {
@@ -2310,7 +2320,9 @@ document.addEventListener('click', (e) => {
 function getGasToken() {
   return new Promise((resolve, reject) => {
     const clientEl = document.getElementById('cb-gas-client-id');
+    const secretEl = document.getElementById('cb-gas-client-secret');
     const clientId = clientEl ? clientEl.value.trim() : "";
+    const clientSecret = secretEl ? secretEl.value.trim() : "";
     if (!clientId) {
       reject(new Error("Missing Google OAuth Client ID. Click '❓ Guide' in the Google Apps Script section."));
       return;
@@ -2318,12 +2330,13 @@ function getGasToken() {
     if (isExtensionContextValid()) {
       if (chrome.storage && chrome.storage.local) {
         const payload = { global_gas_client_id: clientId };
+        if (clientSecret) payload.global_gas_client_secret = clientSecret;
         if (directoryHandle) payload[`gas_client_id_ws_${directoryHandle.name}`] = clientId;
         chrome.storage.local.set(payload).catch(() => {});
       }
-      chrome.runtime.sendMessage({ action: "get_gas_token", clientId: clientId }, (res) => {
+      chrome.runtime.sendMessage({ action: "get_gas_token", clientId: clientId, clientSecret: clientSecret }, (res) => {
         if (res && res.success) resolve(res.token);
-        else reject(new Error(res && res.error ? res.error : "Authentication failed. Check your Google OAuth Client ID."));
+        else reject(new Error(res && res.error ? res.error : "Authentication failed. Check your Google OAuth Client ID / Secret."));
       });
     } else {
       reject(new Error("Extension context invalidated. Refresh page."));
