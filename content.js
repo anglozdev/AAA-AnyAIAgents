@@ -86,7 +86,7 @@ function isMergedFileName(path) {
 // --------------------------------------------------------
 function isInternalMetaFile(path) {
   if (!path) return false;
-  return ['anyai_snippets.md', 'anyai_roles.md', 'anyai_activity.csv', '.anyai_session.md', 'file_list.txt'].includes(path) ? true : isMergedFileName(path);
+  return ['anyai_snippets.md', 'anyai_roles.md', 'anyai_activity.csv', 'anyai_commits.md', '.anyai_session.md', 'file_list.txt'].includes(path) ? true : isMergedFileName(path);
 }
 // --------------------------------------------------------
 function isSpecificSessionUrl(pathname) {
@@ -99,9 +99,10 @@ function isSpecificSessionUrl(pathname) {
 function getCommentWrappedDelimiter(actionWord, filePath) {
   const core = `${DELIM_OPEN} ${actionWord}: ${filePath} ${DELIM_CLOSE}`;
   const lower = (filePath ? filePath : "").toLowerCase();
-  if (lower.endsWith(".html") ? true : (lower.endsWith(".xml") ? true : lower.endsWith(".md"))) return `<!-- ${core} -->`;
-  if (lower.endsWith(".css") ? true : lower.endsWith(".sql")) return `/* ${core} */`;
-  if (lower.endsWith(".py") ? true : (lower.endsWith(".sh") ? true : (lower.endsWith(".yaml") ? true : lower.endsWith(".yml")))) return `# ${core}`;
+  if ([".html", ".xml", ".md", ".svg"].some(ext => lower.endsWith(ext))) return `<!-- ${core} -->`;
+  if ([".css", ".sql"].some(ext => lower.endsWith(ext))) return `/* ${core} */`;
+  if ([".py", ".sh", ".bash", ".zsh", ".ps1", ".psm1", ".psd1", ".yaml", ".yml", ".toml", ".conf", ".ini", ".r", ".rb", ".pl", "dockerfile"].some(ext => lower.endsWith(ext))) return `# ${core}`;
+  if ([".bat", ".cmd"].some(ext => lower.endsWith(ext))) return `REM ${core}`;
   return `// ${core}`;
 }
 // --------------------------------------------------------
@@ -115,7 +116,7 @@ const DEFAULT_INSTRUCTIONS_TEXT = [
   "1. Output every source file inside its own markdown code block using the exact commented boundary format below (commented according to the file language so the tags are valid syntax in the file):",
   "   - JS/TS/GS/C/Java: // " + START_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " ... // " + END_MARKER + " path/to/filename.ext " + DELIM_CLOSE,
   "   - HTML/XML/MD: <!-- " + START_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " --> ... <!-- " + END_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " -->",
-  "   - Python/Sh/YAML: # " + START_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " ... # " + END_MARKER + " path/to/filename.ext " + DELIM_CLOSE,
+  "   - Python/Sh/Bash/PowerShell(.ps1)/YAML: # " + START_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " ... # " + END_MARKER + " path/to/filename.ext " + DELIM_CLOSE,
   "   - CSS/SQL: /* " + START_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " */ ... /* " + END_MARKER + " path/to/filename.ext " + DELIM_CLOSE + " */",
   "2. Both START and END tags must begin at column 0 of a new line, and the filename in START: and END: must match character-for-character.",
   "3. EXISTING FILES (Patches): Inside the file START/END markers, use commented patch tags:",
@@ -129,6 +130,7 @@ const DEFAULT_INSTRUCTIONS_TEXT = [
   "6. Direct Agent Message: [@AgentName] message",
   "7. Broadcast to All Agents: [BROADCAST] message",
   "8. CRITICAL RULE: If responding to a [BROADCAST] or Rollcall, do NOT generate code blocks or dummy files. Acknowledge receipt with plain text only.",
+  "9. Git Commit Summary: Whenever outputting code blocks or patches, include a concise commit message tag outside the code block: [COMMIT: concise summary of changes]",
   "ANSWERS:",
   "- If you are out of memory context for a file, request it by outputting: [REQ:path/file.ext]"
 ].join("\n");
@@ -205,7 +207,7 @@ const DEFAULT_ROLES = [
 // AI MULTI-FILE DELIMITER & REGEX PARSER
 // --------------------------------------------------------
 function buildCommentPrefixPattern() {
-  const commentTokens = ["\\/\\/", "#", "<!--", "\\/\\*", "--", "%"].join(OR_OP);
+  const commentTokens = ["\\/\\/", "#", "<!--", "\\/\\*", "--", "%", "REM\\b", "::"].join(OR_OP);
   return "(?:[ \\t]*(?:" + commentTokens + ")[ \\t]*)?";
 }
 // --------------------------------------------------------
@@ -355,6 +357,7 @@ async function loadDirectoryHandle() {
 // --------------------------------------------------------
 // UI INJECTION
 // --------------------------------------------------------
+document.querySelectorAll('#codebridge-sidebar, #cb-diff-modal, #cb-merge-modal, #cb-sessions-modal').forEach(el => el.remove());
 const sidebar = document.createElement('div');
 sidebar.id = 'codebridge-sidebar';
 sidebar.style.display = 'none';
@@ -368,18 +371,28 @@ sidebar.innerHTML = [
   '  <option value="">-- Set Agent Role --</option>',
   '</select>',
   '<div style="display: flex; gap: 5px; margin: 4px 0; align-items: stretch;">',
-  '  <button id="cb-btn-folder" style="flex: 1; margin: 0 !important;">1. Select Workspace/Folder</button>',
+  '  <button id="cb-btn-folder" style="flex: 1; margin: 0 !important; background: #1976d2; min-height: 32px !important; padding: 8px 10px !important; font-size: 12px !important;">1. Select Workspace/Folder</button>',
   '  <button id="cb-btn-sessions" disabled title="View & recover saved workspace sessions across all AIs" style="background: #00897b; padding: 6px 10px !important; margin: 0 !important; font-size: 11px !important; white-space: nowrap;">🕒 Sessions</button>',
   '</div>',
-  '<div style="display: flex; justify-content: space-between; align-items: center; background: #252525; padding: 5px 10px; margin-top: 6px; border-radius: 4px 4px 0 0; border-bottom: 1px solid #444;">',
-  '  <span style="font-size: 11px; font-weight: bold; color: #bbb;">Workspace Files (Click name for actions)</span>',
-  '  <label style="font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; margin: 0;"><input type="checkbox" id="cb-select-all" checked style="cursor: pointer; margin: 0;"> All</label>',
-  '</div>',
-  '<div class="file-list" id="cb-file-list" style="margin-top: 0; border-radius: 0 0 4px 4px; max-height: 220px; overflow-y: auto; overflow-x: hidden;">No workspace/folder selected</div>',
-  '<div style="display: flex; gap: 5px; margin-bottom: 5px;">',
-  '  <button id="cb-btn-merge-save" disabled style="flex: 1; font-size: 11px; padding: 6px; background: #0288d1;" title="Filter file types and merge into a datestamped file">📦 Merge to File</button>',
-  '  <button id="cb-btn-merge-paste" disabled style="flex: 1; font-size: 11px; padding: 6px; background: #7b1fa2;" title="Filter file types, merge, and attach into chat">📋 Attach Merged</button>',
-  '</div>',
+  '<details open style="margin: 6px 0; background: #2a2a2a; padding: 5px; border-radius: 4px;">',
+  '  <summary style="cursor: pointer; font-size: 13px; font-weight: bold;">📁 Workspace Files <span style="font-size: 10px; font-weight: normal; color: #aaa;">(Click name for actions)</span></summary>',
+  '  <div style="margin-top: 6px;">',
+  '    <div style="display: flex; justify-content: space-between; align-items: center; background: #252525; padding: 4px 8px; border-radius: 4px 4px 0 0; border-bottom: 1px solid #444;">',
+  '      <span style="font-size: 11px; color: #bbb;">Select files to attach</span>',
+  '      <div style="display: flex; align-items: center; gap: 4px;">',
+  '        <button id="cb-btn-expand-folders" disabled title="Expand all subfolders" style="background: #383838; color: #fff; border: 1px solid #555; padding: 2px 5px !important; margin: 0 !important; min-height: 20px !important; font-size: 10px !important; border-radius: 3px !important; cursor: pointer;">➕</button>',
+  '        <button id="cb-btn-collapse-folders" disabled title="Collapse all subfolders" style="background: #383838; color: #fff; border: 1px solid #555; padding: 2px 5px !important; margin: 0 !important; min-height: 20px !important; font-size: 10px !important; border-radius: 3px !important; cursor: pointer;">➖</button>',
+  '        <button id="cb-btn-refresh-files" disabled title="Rescan workspace folder from disk" style="background: #383838; color: #fff; border: 1px solid #555; padding: 2px 6px !important; margin: 0 !important; min-height: 20px !important; font-size: 11px !important; border-radius: 3px !important; cursor: pointer;">🔄</button>',
+  '        <label style="font-size: 11px; cursor: pointer; display: flex; align-items: center; gap: 4px; margin: 0 0 0 4px;"><input type="checkbox" id="cb-select-all" checked style="cursor: pointer; margin: 0;"> All</label>',
+  '      </div>',
+  '    </div>',
+  '    <div class="file-list" id="cb-file-list" style="margin-top: 0; border-radius: 0 0 4px 4px; max-height: 180px; overflow-y: auto; overflow-x: hidden; background: #1e1e1e;">No workspace/folder selected</div>',
+  '    <div style="display: flex; gap: 5px; margin-top: 4px;">',
+  '      <button id="cb-btn-merge-save" disabled style="flex: 1; font-size: 11px; padding: 6px; background: #0288d1; margin: 0 !important;" title="Filter file types and merge into a datestamped file">📦 Merge to File</button>',
+  '      <button id="cb-btn-merge-paste" disabled style="flex: 1; font-size: 11px; padding: 6px; background: #7b1fa2; margin: 0 !important;" title="Filter file types, merge, and attach into chat">📋 Attach Merged</button>',
+  '    </div>',
+  '  </div>',
+  '</details>',
   '<select id="cb-snippet-select" style="width: 100%; margin-top: 4px;">',
   '  <option value="">-- Load Snippet --</option>',
   '</select>',
@@ -395,7 +408,7 @@ sidebar.innerHTML = [
   '  <label style="font-size: 11px; cursor: pointer; white-space: nowrap;"><input type="checkbox" id="cb-auto-answer" checked> Auto-Answer</label>',
   '</div>',
   '<div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">',
-  '  <button id="cb-btn-pull" disabled style="flex: 1;">3. Pull AI Output & Save</button>',
+  '  <button id="cb-btn-pull" disabled style="flex: 1; background: #ef6c00; min-height: 32px !important; padding: 8px 10px !important; font-size: 12px !important;">3. Pull AI Output & Save</button>',
   '  <label style="font-size: 11px; cursor: pointer; white-space: nowrap;"><input type="checkbox" id="cb-auto-pull"> Auto-Pull</label>',
   '</div>',
   '<textarea id="cb-manual-pull-input" rows="2" placeholder="Optional: Paste raw code/patches here to decode manually instead of pulling from chat..." style="font-size: 11px; margin-top: 4px;"></textarea>',
@@ -410,8 +423,8 @@ sidebar.innerHTML = [
   '    <input type="password" id="cb-gas-client-secret" placeholder="Google OAuth Client Secret (GOCSPX-... for zero-popup refresh)">',
   '    <input type="text" id="cb-script-id" placeholder="Script ID (linked to workspace)">',
   '    <div style="display: flex; gap: 5px; margin-bottom: 5px;">',
-  '      <button id="cb-btn-pull-gas" style="flex: 1; font-size: 11px; padding: 6px;">⬇ Pull GAS</button>',
-  '      <button id="cb-btn-push-gas" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push GAS</button>',
+  '      <button id="cb-btn-pull-gas" title="Pull Google Apps Script project files into local workspace" style="flex: 1; font-size: 11px; padding: 6px;">⬇ Pull GAS</button>',
+  '      <button id="cb-btn-push-gas" title="Push local workspace files to Google Apps Script" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push GAS</button>',
   '    </div>',
   '    <div style="display: flex; align-items: center;">',
   '      <input type="checkbox" id="cb-autopush-toggle" checked style="width: auto; margin: 0 5px 0 0;">',
@@ -431,10 +444,11 @@ sidebar.innerHTML = [
   '      <select id="cb-git-branch" style="flex: 1;"><option value="main">main</option></select>',
   '      <button id="cb-btn-new-branch" style="font-size: 11px; padding: 6px;" title="Create new branch">➕</button>',
   '    </div>',
+  '    <input type="text" id="cb-git-path" placeholder="Repo subfolder (optional, e.g. public)">',
   '    <input type="text" id="cb-git-commit-msg" placeholder="Commit message..." value="AAA Update">',
   '    <div style="display: flex; gap: 5px;">',
-  '      <button id="cb-btn-pull-git" style="flex: 1; font-size: 11px; padding: 6px;">⬇️ Pull Repo</button>',
-  '      <button id="cb-btn-push-git" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push Commit</button>',
+  '      <button id="cb-btn-pull-git" title="Pull files from GitHub branch into local workspace" style="flex: 1; font-size: 11px; padding: 6px;">⬇️ Pull Repo</button>',
+  '      <button id="cb-btn-push-git" title="Commit and push local workspace files to GitHub" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push Commit</button>',
   '    </div>',
   '  </div>',
   '</details>',
@@ -511,6 +525,9 @@ const btnPower = document.getElementById('cb-btn-power');
 const btnClose = document.getElementById('cb-btn-close');
 const btnFolder = document.getElementById('cb-btn-folder');
 const btnSessions = document.getElementById('cb-btn-sessions');
+const btnExpandFolders = document.getElementById('cb-btn-expand-folders');
+const btnCollapseFolders = document.getElementById('cb-btn-collapse-folders');
+const btnRefreshFiles = document.getElementById('cb-btn-refresh-files');
 const fileList = document.getElementById('cb-file-list');
 const btnMergeSave = document.getElementById('cb-btn-merge-save');
 const btnMergePaste = document.getElementById('cb-btn-merge-paste');
@@ -630,25 +647,43 @@ async function writeWorkspaceFileDirect(filePath, newContent) {
   await writable.close();
   fileSizes[filePath] = newContent.length;
   logAndTrackFile('Editor Save', filePath);
+  if (filePath === 'anyai_roles.md') {
+    rolesFileHandle = handle;
+    await parseRolesFile();
+  } else if (filePath === 'anyai_snippets.md') {
+    snippetsFileHandle = handle;
+    await parseSnippetsFile();
+  }
 }
 // --------------------------------------------------------
 function buildLiveHighlightedEditorDOM(doc, initialText, onTextChange, onSaveShortcut) {
   const wrap = doc.createElement('div');
-  wrap.style.cssText = 'display:flex;flex:1;height:70vh;background:#111;border:1px solid #0288d1;border-radius:6px;overflow:hidden;font-family:Consolas,Monaco,"Courier New",monospace;position:relative;';
+  wrap.style.cssText = 'display:flex;width:100%;height:68vh;min-height:420px;background:#111;border:1px solid #0288d1;border-radius:6px;overflow:hidden;font-family:Consolas,Monaco,"Courier New",monospace;position:relative;flex-shrink:0;';
   const gutter = doc.createElement('div');
-  gutter.style.cssText = 'width:48px;background:#181818;color:#666;text-align:right;padding:12px 8px 12px 4px;border-right:1px solid #2a2a2a;user-select:none;overflow:hidden;font-size:13px;line-height:1.5;white-space:pre;flex-shrink:0;';
+  gutter.style.cssText = 'width:48px;height:100%;background:#181818;color:#666;text-align:right;padding:12px 8px 12px 4px;border-right:1px solid #2a2a2a;user-select:none;overflow:hidden;font-size:13px;line-height:1.5;white-space:pre;flex-shrink:0;';
   const stage = doc.createElement('div');
-  stage.style.cssText = 'position:relative;flex:1;height:100%;overflow:hidden;background:#111;';
-  const sharedFontCss = 'position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:12px;border:none;font-family:Consolas,Monaco,"Courier New",monospace;font-size:13px;line-height:1.5;white-space:pre;overflow:auto;box-sizing:border-box;tab-size:2;';
+  stage.style.cssText = 'position:relative;flex:1;height:100%;min-height:420px;overflow:hidden;background:#111;';
+  const sharedFontCss = 'position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:12px;border:none;font-family:Consolas,Monaco,"Courier New",monospace !important;font-size:13px !important;line-height:1.5 !important;white-space:pre;overflow:auto;box-sizing:border-box;tab-size:2;';
   const highlightPre = doc.createElement('pre');
-  highlightPre.style.cssText = sharedFontCss + 'color:#d4d4d4;pointer-events:none;z-index:1;background:transparent;';
+  highlightPre.style.cssText = sharedFontCss + 'color:#d4d4d4;pointer-events:none;z-index:1;background:transparent;display:block;';
   const textarea = doc.createElement('textarea');
   textarea.spellcheck = false;
   textarea.value = initialText || '';
-  textarea.style.cssText = sharedFontCss + 'color:transparent;background:transparent;caret-color:#4fc3f7;resize:none;outline:none;z-index:2;';
+  textarea.style.cssText = sharedFontCss + 'color:transparent;-webkit-text-fill-color:transparent;background:transparent;caret-color:#4fc3f7;resize:none;outline:none;z-index:2;display:block;';
+  let usePlainTextFallback = false;
   const syncRender = () => {
     const val = textarea.value;
-    highlightPre.innerHTML = highlightSyntaxTokensOnly(val) + '\n';
+    if (!usePlainTextFallback) {
+      try {
+        highlightPre.innerHTML = highlightSyntaxTokensOnly(val) + '\n';
+        if (val.length > 0 && !highlightPre.textContent) throw new Error('Empty innerHTML');
+      } catch (e) {
+        usePlainTextFallback = true;
+        highlightPre.style.display = 'none';
+        textarea.style.color = '#d4d4d4';
+        textarea.style.webkitTextFillColor = '#d4d4d4';
+      }
+    }
     const count = val.split('\n').length;
     let g = '';
     for (let i = 1; i <= count; i++) g += i + '\n';
@@ -748,10 +783,16 @@ function showFilePreviewModal(filePath, fileObj, isImage, textContent, startInEd
     }
   };
   const renderBody = () => {
-    bodyContainer.innerHTML = '';
+    bodyContainer.textContent = '';
     if (isImage && fileObj) {
       blobUrl = URL.createObjectURL(fileObj);
-      bodyContainer.innerHTML = `<div style="text-align:center;padding:16px;overflow:auto;max-height:72vh;max-width:100%;"><img src="${blobUrl}" style="border-radius:6px;border:1px solid #333;" /></div>`;
+      const imgWrap = document.createElement('div');
+      imgWrap.style.cssText = 'text-align:center;padding:16px;overflow:auto;max-height:72vh;max-width:100%;';
+      const imgEl = document.createElement('img');
+      imgEl.src = blobUrl;
+      imgEl.style.cssText = 'border-radius:6px;border:1px solid #333;max-width:100%;';
+      imgWrap.appendChild(imgEl);
+      bodyContainer.appendChild(imgWrap);
       return;
     }
     if (!isEditMode) {
@@ -760,8 +801,15 @@ function showFilePreviewModal(filePath, fileObj, isImage, textContent, startInEd
       statusBadge.textContent = 'Read-Only';
       statusBadge.style.background = '#333';
       statusBadge.style.color = '#aaa';
-      const formattedHtml = formatCodeWithNumbersAndHighlight(currentText);
-      bodyContainer.innerHTML = `<div style="background:#111;color:#d4d4d4;padding:12px;border-radius:6px;border:1px solid #333;overflow-x:auto;overflow-y:auto;max-height:72vh;max-width:100%;font-size:13px;font-family:Consolas,Monaco,'Courier New',monospace;margin:0;">${formattedHtml}</div>`;
+      const roBox = document.createElement('div');
+      roBox.style.cssText = 'background:#111;color:#d4d4d4;padding:12px;border-radius:6px;border:1px solid #333;overflow-x:auto;overflow-y:auto;height:68vh;min-height:420px;max-width:100%;font-size:13px;font-family:Consolas,Monaco,"Courier New",monospace;margin:0;white-space:pre;';
+      try {
+        roBox.innerHTML = formatCodeWithNumbersAndHighlight(currentText);
+        if (currentText.length > 0 && !roBox.textContent) throw new Error('TrustedTypes blocked innerHTML');
+      } catch (e) {
+        roBox.textContent = currentText;
+      }
+      bodyContainer.appendChild(roBox);
     } else {
       btnToggleEdit.textContent = '👁️ Read-Only View';
       btnSaveModal.style.display = 'inline-block';
@@ -870,14 +918,24 @@ function showFileActionMenu(filePath, anchorX, anchorY) {
   const top = Math.min(anchorY, window.innerHeight - 220);
   menu.style.cssText = `position:fixed;left:${left}px;top:${top}px;width:225px;background:#1e1e1e;color:#e0e0e0;border:1px solid #0288d1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,0.75);z-index:2147483647;padding:6px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:12px;`;
   const btnStyle = 'display:block;width:100%;text-align:left;background:transparent;color:#e0e0e0;border:none;padding:7px 10px;border-radius:5px;cursor:pointer;font-size:12px;';
-  menu.innerHTML = `
-    <div style="padding:5px 8px;font-size:11px;color:#4fc3f7;font-weight:bold;border-bottom:1px solid #333;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${filePath}">${filePath}</div>
-    <button data-act="copy-path" style="${btnStyle}">📋 Copy File Path</button>
-    <button data-act="copy-content" style="${btnStyle}">📄 Copy File Content</button>
-    <button data-act="preview-modal" style="${btnStyle}">🔍 Preview in Modal</button>
-    <button data-act="edit-modal" style="${btnStyle}">✏️ Edit & Save in Modal</button>
-    <button data-act="open-tab" style="${btnStyle}">↗️ Open Editor in New Tab</button>
-  `;
+  const headerDiv = document.createElement('div');
+  headerDiv.style.cssText = 'padding:5px 8px;font-size:11px;color:#4fc3f7;font-weight:bold;border-bottom:1px solid #333;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+  headerDiv.title = filePath;
+  headerDiv.textContent = filePath;
+  menu.appendChild(headerDiv);
+  [
+    ['copy-path', '📋 Copy File Path'],
+    ['copy-content', '📄 Copy File Content'],
+    ['preview-modal', '🔍 Preview in Modal'],
+    ['edit-modal', '✏️ Edit & Save in Modal'],
+    ['open-tab', '↗️ Open Editor in New Tab']
+  ].forEach(([act, label]) => {
+    const b = document.createElement('button');
+    b.setAttribute('data-act', act);
+    b.style.cssText = btnStyle;
+    b.textContent = label;
+    menu.appendChild(b);
+  });
   document.body.appendChild(menu);
   menu.querySelectorAll('button').forEach(btn => {
     btn.addEventListener('mouseenter', () => { btn.style.background = '#2c2c2c'; });
@@ -1170,7 +1228,7 @@ async function loadWorkspaceConfig() {
   } else if (gasClientEl && gasClientEl.value.trim()) {
     setTimeout(() => saveWorkspaceConfig(), 200);
   }
-  const inputs = ['cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
+  const inputs = ['cb-git-path', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
   inputs.forEach(id => {
     const el = document.getElementById(id);
     if (el && config[id] !== undefined) {
@@ -1232,7 +1290,7 @@ async function saveWorkspaceConfig() {
   } catch (e) {}
   if (!directoryHandle) return;
   const config = {};
-  const inputs = ['cb-script-id', 'cb-gas-client-id', 'cb-git-repo', 'cb-git-branch', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
+  const inputs = ['cb-script-id', 'cb-gas-client-id', 'cb-git-repo', 'cb-git-branch', 'cb-git-path', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
   inputs.forEach(id => {
     const el = document.getElementById(id);
     if (el) config[id] = el.value;
@@ -1254,7 +1312,7 @@ document.body.addEventListener('input', (e) => {
   if (e.target.id === 'cb-file-filter') {
     applyLiveWorkspaceFilter(false);
   }
-  const targets = ['cb-script-id', 'cb-gas-client-id', 'cb-gas-client-secret', 'cb-git-token', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
+  const targets = ['cb-script-id', 'cb-gas-client-id', 'cb-gas-client-secret', 'cb-git-token', 'cb-git-path', 'cb-file-filter', 'cb-git-commit-msg', 'cb-regex'];
   if (targets.includes(e.target.id)) {
     clearTimeout(configSaveTimeout);
     configSaveTimeout = setTimeout(() => {
@@ -1325,10 +1383,14 @@ function persistFileCheckboxState() {
 }
 // --------------------------------------------------------
 selectAllToggle.addEventListener('change', (e) => {
+  const isChecked = e.target.checked;
+  fileList.querySelectorAll('details > summary > input[type="checkbox"]').forEach(cb => {
+    cb.checked = isChecked;
+  });
   fileList.querySelectorAll('.file-item').forEach(row => {
     if (row.style.display === 'none') return;
     const cb = row.querySelector('input[type="checkbox"]');
-    if (cb) cb.checked = e.target.checked;
+    if (cb) cb.checked = isChecked;
   });
   persistFileCheckboxState();
 });
@@ -1355,12 +1417,14 @@ roleSelect.addEventListener('change', async (e) => {
       const text = await (await rolesFileHandle.getFile()).text();
       let persona = "";
       let capture = false;
-      for (const line of text.split('\n')) {
-        if (line.startsWith('## ')) {
+      for (const rawLine of text.split('\n')) {
+        const trimmedLine = rawLine.trim();
+        const headingMatch = trimmedLine.match(/^##(?!#)\s*(.+)/);
+        if (headingMatch) {
           if (capture) break;
-          if (line.substring(3).trim() === selectedRole) capture = true;
-        } else if (capture && !line.includes(END_MARKER)) {
-          persona += line + "\n";
+          if (headingMatch[1].trim() === selectedRole) capture = true;
+        } else if (capture && !trimmedLine.includes(END_MARKER)) {
+          persona += rawLine.replace(/\r$/, '') + "\n";
         }
       }
       if (persona.trim()) sendToChat(null, true, `[INIT:${selectedRole}]\n${persona.trim()}`);
@@ -1567,8 +1631,13 @@ function resetUnconnectedWorkspaceUI() {
   btnMergeSave.disabled = true;
   btnMergePaste.disabled = true;
   if (btnSessions) btnSessions.disabled = true;
+  if (btnExpandFolders) btnExpandFolders.disabled = true;
+  if (btnCollapseFolders) btnCollapseFolders.disabled = true;
+  if (btnRefreshFiles) btnRefreshFiles.disabled = true;
   const scriptEl = document.getElementById('cb-script-id');
   if (scriptEl) scriptEl.value = "";
+  const gitPathEl = document.getElementById('cb-git-path');
+  if (gitPathEl) gitPathEl.value = "";
   repoSelect.innerHTML = `<option value="">-- Select Repo --</option><option value="__CREATE__">➕ Create New...</option>`;
   branchSelect.innerHTML = `<option value="main">main</option>`;
   syncGitTokenUI();
@@ -1638,6 +1707,9 @@ async function loadFilesFromHandle(handle) {
     btnMergeSave.disabled = false;
     btnMergePaste.disabled = false;
     if (btnSessions) btnSessions.disabled = false;
+    if (btnExpandFolders) btnExpandFolders.disabled = false;
+    if (btnCollapseFolders) btnCollapseFolders.disabled = false;
+    if (btnRefreshFiles) btnRefreshFiles.disabled = false;
     btnFolder.textContent = `1. Workspace/Folder: ${handle.name}`;
     btnFolder.style.backgroundColor = "#1976d2";
     await applyLiveWorkspaceFilter(true);
@@ -1674,7 +1746,7 @@ async function parseSnippetsFile() {
       currentKey = null;
       currentValLines = [];
     };
-    const reservedTokens = ["@", "BROADCAST\\]", "REQ:", "WEB_CMD:", "MAP\\]", "INIT:", "SYSTEM", "INCOMING"].join(OR_OP);
+    const reservedTokens = ["@", "BROADCAST\\]", "REQ:", "WEB_CMD:", "COMMIT:", "MAP\\]", "INIT:", "SYSTEM", "INCOMING"].join(OR_OP);
     const reservedTagRegex = new RegExp("^\\[(?:" + reservedTokens + ")", "i");
     text.replace(/\r\n/g, '\n').split('\n').forEach(rawLine => {
       const trimmed = rawLine.trim();
@@ -1700,32 +1772,41 @@ async function parseSnippetsFile() {
 }
 // --------------------------------------------------------
 async function parseRolesFile() {
+  if (!rolesFileHandle && directoryHandle) {
+    try {
+      rolesFileHandle = await directoryHandle.getFileHandle('anyai_roles.md');
+    } catch (e) {}
+  }
   if (!rolesFileHandle) return;
   try {
+    const previousSelection = roleSelect.value || localStorage.getItem('cb-role-url-' + currentUrlPath);
     const text = await (await rolesFileHandle.getFile()).text();
     roleSelect.innerHTML = '<option value="">-- Set Agent Role --</option>';
-    text.split('\n').forEach(line => {
-      if (line.trim().startsWith('## ')) {
-        const role = line.substring(3).trim();
+    text.replace(/\r\n/g, '\n').split('\n').forEach(line => {
+      const match = line.trim().match(/^##(?!#)\s*(.+)/);
+      if (match) {
+        const role = match[1].trim();
+        if (!role) return;
         const opt = document.createElement('option');
         opt.value = role;
         opt.textContent = `Assume: ${role}`;
         roleSelect.appendChild(opt);
       }
     });
-    const savedRoleForUrl = localStorage.getItem('cb-role-url-' + currentUrlPath);
-    if (savedRoleForUrl && Array.from(roleSelect.options).some(o => o.value === savedRoleForUrl)) {
-      roleSelect.value = savedRoleForUrl;
-      currentAgentRole = savedRoleForUrl;
+    if (previousSelection && Array.from(roleSelect.options).some(o => o.value === previousSelection)) {
+      roleSelect.value = previousSelection;
+      currentAgentRole = previousSelection;
       updateTabTitle();
       syncRoleWithRouter();
-      statusDiv.textContent = `Restored Role: ${savedRoleForUrl}`;
     } else {
       currentAgentRole = "";
       roleSelect.value = "";
     }
   } catch (e) {}
 }
+roleSelect.addEventListener('focus', () => {
+  if (directoryHandle) parseRolesFile();
+});
 // --------------------------------------------------------
 async function attemptAutoLoad() {
   currentUrlPath = window.location.pathname;
@@ -1745,6 +1826,31 @@ async function attemptAutoLoad() {
     resetUnconnectedWorkspaceUI();
     statusDiv.textContent = "No workspace/folder linked to this session.";
   }
+}
+// --------------------------------------------------------
+if (btnExpandFolders) {
+  btnExpandFolders.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileList.querySelectorAll('details').forEach(d => { d.open = true; });
+  });
+}
+if (btnCollapseFolders) {
+  btnCollapseFolders.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fileList.querySelectorAll('details').forEach(d => { d.open = false; });
+  });
+}
+if (btnRefreshFiles) {
+  btnRefreshFiles.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!directoryHandle) return;
+    statusDiv.textContent = "⏳ Refreshing workspace files...";
+    await loadFilesFromHandle(directoryHandle);
+    showCbToast("🔄 Workspace file list refreshed!");
+  });
 }
 // --------------------------------------------------------
 btnFolder.addEventListener('click', async () => {
@@ -1783,10 +1889,14 @@ async function processDirectory(dirHandle, path = '', parentElement, filters, sa
       folderCb.style.float = 'right';
       folderCb.addEventListener('click', (e) => e.stopPropagation());
       folderCb.addEventListener('change', (e) => {
+        const isChecked = e.target.checked;
+        details.querySelectorAll('details > summary > input[type="checkbox"]').forEach(cb => {
+          cb.checked = isChecked;
+        });
         details.querySelectorAll('.file-item').forEach(row => {
           if (row.style.display === 'none') return;
           const cb = row.querySelector('input[type="checkbox"]');
-          if (cb) cb.checked = e.target.checked;
+          if (cb) cb.checked = isChecked;
         });
         persistFileCheckboxState();
       });
@@ -2015,6 +2125,8 @@ async function pushToGitHub() {
   const token = document.getElementById('cb-git-token').value.trim();
   const repo = repoSelect.value;
   const branch = document.getElementById('cb-git-branch').value.trim();
+  const rawSubPath = (document.getElementById('cb-git-path') ? document.getElementById('cb-git-path').value : '').trim().replace(/^\/+|\/+$/g, '');
+  const repoPrefix = rawSubPath ? `${rawSubPath}/` : '';
   const msgVal = document.getElementById('cb-git-commit-msg').value.trim();
   const msg = msgVal ? msgVal : "AAA Update";
   if (!token ? true : (!repo ? true : (!branch ? true : repo === '__CREATE__'))) {
@@ -2062,6 +2174,7 @@ async function pushToGitHub() {
     }
     const hardExcluded = [
       'anyai_activity.csv',
+      'anyai_commits.md',
       '.anyai_session.md',
       '.anyai_config.json',
       'anyai_roles.md',
@@ -2108,11 +2221,11 @@ async function pushToGitHub() {
           });
           if (blobRes.ok) {
             const blobData = await blobRes.json();
-            newTree.push({ path: path, mode: '100644', type: 'blob', sha: blobData.sha });
+            newTree.push({ path: repoPrefix + path, mode: '100644', type: 'blob', sha: blobData.sha });
           }
         } else {
           const textContent = await fileObj.text();
-          newTree.push({ path: path, mode: '100644', type: 'blob', content: textContent });
+          newTree.push({ path: repoPrefix + path, mode: '100644', type: 'blob', content: textContent });
         }
       } catch (fileErr) {}
     }
@@ -2162,10 +2275,12 @@ async function pullFromGitHub() {
   const token = document.getElementById('cb-git-token').value.trim();
   const repo = repoSelect.value;
   const branch = document.getElementById('cb-git-branch').value.trim();
+  const rawSubPath = (document.getElementById('cb-git-path') ? document.getElementById('cb-git-path').value : '').trim().replace(/^\/+|\/+$/g, '');
+  const repoPrefix = rawSubPath ? `${rawSubPath}/` : '';
   if (!token ? true : (!repo ? true : (!branch ? true : repo === '__CREATE__'))) {
     return statusDiv.textContent = "❌ Missing GitHub PAT, Repo, or Branch.";
   }
-  statusDiv.textContent = `⏳ Fetching ${repo}@${branch}...`;
+  statusDiv.textContent = `⏳ Fetching ${repo}@${branch}${repoPrefix ? '/' + rawSubPath : ''}...`;
   try {
     const headers = { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github.v3+json' };
     const baseUrl = `https://api.github.com/repos/${repo}`;
@@ -2182,12 +2297,15 @@ async function pullFromGitHub() {
       throw new Error(`Tree Error (${treeRes.status}): ${errData.message ? errData.message : treeRes.statusText}`);
     }
     const treeData = await treeRes.json();
-    const blobs = (treeData.tree ? treeData.tree : []).filter(item => item.type === 'blob');
-    if (blobs.length === 0) return statusDiv.textContent = "⚠️ Repository branch is empty.";
+    const blobs = (treeData.tree ? treeData.tree : []).filter(item =>
+      item.type === 'blob' && (!repoPrefix || item.path.startsWith(repoPrefix))
+    );
+    if (blobs.length === 0) return statusDiv.textContent = repoPrefix ? `⚠️ No files found inside "${rawSubPath}/" on ${branch}.` : "⚠️ Repository branch is empty.";
     let pulledCount = 0;
     for (const item of blobs) {
-      if (['.anyai_config.json', 'anyai_activity.csv', 'anyai_instructions.md'].includes(item.path)) continue;
-      statusDiv.textContent = `⬇️ Pulling (${pulledCount + 1}/${blobs.length}): ${item.path.split('/').pop()}...`;
+      const relPath = repoPrefix ? item.path.substring(repoPrefix.length) : item.path;
+      if (!relPath || ['.anyai_config.json', 'anyai_activity.csv', 'anyai_instructions.md'].includes(relPath)) continue;
+      statusDiv.textContent = `⬇️ Pulling (${pulledCount + 1}/${blobs.length}): ${relPath.split('/').pop()}...`;
       const blobRes = await fetch(item.url, { headers });
       if (!blobRes.ok) throw new Error(`Failed to fetch ${item.path}`);
       const blobData = await blobRes.json();
@@ -2196,7 +2314,7 @@ async function pullFromGitHub() {
       const bytes = new Uint8Array(binaryStr.length);
       for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
       const textContent = new TextDecoder('utf-8').decode(bytes);
-      const parts = item.path.split('/');
+      const parts = relPath.split('/');
       const fileName = parts.pop();
       let currentDir = directoryHandle;
       for (const folder of parts) {
@@ -3483,14 +3601,6 @@ function fuzzyReplace(content, search, replace) {
       if (match) return normC.replace(match[0], () => normR);
     } catch (e) {}
   }
-  let ultraSearch = linesSearch.join('').replace(/\s+/g, '').split('').map(escapeRegEx).join('\\s*');
-  if (ultraSearch.length > 0) {
-    try {
-      let ultraRegex = new RegExp(ultraSearch);
-      let ultraMatch = normC.match(ultraRegex);
-      if (ultraMatch) return normC.replace(ultraMatch[0], () => normR);
-    } catch (e) {}
-  }
   return null;
 }
 // --------------------------------------------------------
@@ -3506,15 +3616,37 @@ function isValidTargetFilename(path) {
   return baseName.includes('.');
 }
 // --------------------------------------------------------
-function isPatchAlreadyInContent(content, replaceStr) {
+function isPatchAlreadyInContent(content, searchStr, replaceStr) {
   if (!content ? true : !replaceStr) return false;
-  const norm = (str) => str.replace(/\r\n/g, '\n').replace(/\u00A0/g, ' ').replace(/[\u200B-\u200D\uFEFF]/g, '').split('\n').map(l => l.trim()).filter(l => l.length > 0).join('\n');
-  const normR = norm(replaceStr);
-  if (!normR) return false;
-  return norm(content).includes(normR);
+  const stripNoise = (str) => str
+    .replace(/\r\n/g, '\n')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !/^(?:\/\/|#|\/\*|--)\s*[-=_*]{4,}/.test(l));
+  const cLines = stripNoise(content).join('\n');
+  const rLines = stripNoise(replaceStr).join('\n');
+  const sLines = searchStr ? stripNoise(searchStr).join('\n') : '';
+  if (!rLines || rLines === sLines) return false;
+  if (cLines.includes(rLines)) {
+    // If replaceStr is simply a subset of searchStr (a deletion patch), only mark as already applied if searchStr is gone
+    if (sLines && sLines.includes(rLines)) {
+      return !cLines.includes(sLines);
+    }
+    return true;
+  }
+  return false;
 }
 // --------------------------------------------------------
 // PULL AI OUTPUT & SAVE ENGINE (WITH PATCH DEDUPLICATION & ALREADY-APPLIED CHECK)
+// --------------------------------------------------------
+async function yieldUIStatus(msg) {
+  const liveStatus = document.getElementById('cb-status') || statusDiv;
+  liveStatus.removeAttribute('data-pull-summary');
+  liveStatus.textContent = msg;
+  await new Promise(r => setTimeout(r, 0));
+}
 // --------------------------------------------------------
 let pendingWrites = [];
 let isPullRunning = false;
@@ -3525,13 +3657,17 @@ btnPull.addEventListener('click', async () => {
     const manualInputEl = document.getElementById('cb-manual-pull-input');
     const manualText = manualInputEl ? manualInputEl.value.trim() : "";
     const isManualOverride = manualText.length > 0;
-    statusDiv.textContent = isManualOverride ? "Scanning manual input..." : "Scanning response...";
+    await yieldUIStatus(isManualOverride ? "⏳ [5%] Scanning manual input..." : "⏳ [5%] Extracting response from DOM...");
     const fullResponseText = isManualOverride ? manualText : getCurrentAssistantResponseText();
     if (!fullResponseText ? true : fullResponseText.trim() === "") {
       return statusDiv.textContent = "No text captured yet. Let AI finish typing or paste into manual box.";
     }
+    const commitTagMatch = fullResponseText.match(/\[COMMIT:\s*([^\]]+)\]/i);
+    window.lastExtractedCommitMsg = commitTagMatch && commitTagMatch[1] ? commitTagMatch[1].trim() : "";
     processRPAAndAgents(fullResponseText);
     const textToProcess = (isManualOverride ? manualText : extractCodeBlocksOnly()).replace(/\r\n/g, '\n');
+    const totalInputLines = textToProcess.split('\n').length;
+    await yieldUIStatus(`⏳ [15%] Parsing file blocks (${totalInputLines} lines)...`);
     const parsed = parseAiFileBlocks(textToProcess, true);
     if (parsed.hasErrors) {
       const truncatedList = parsed.incomplete.join(', ');
@@ -3570,6 +3706,9 @@ btnPull.addEventListener('click', async () => {
       let rawPath = extractedEntries[i][0].trim();
       let cleanPath = rawPath.replace(/^[\/*#%<\s]+/, '').replace(/[\/*#%>\s`]+$/, '').trim();
       let sectionContent = extractedEntries[i][1].replace(/\r\n/g, '\n');
+      const sectionLines = sectionContent.split('\n').length;
+      const scanPct = Math.round(20 + ((i + 1) / extractedEntries.length) * 50);
+      await yieldUIStatus(`⏳ [${scanPct}%] Processing (${i + 1}/${extractedEntries.length}): ${cleanPath.split('/').pop()} (${sectionLines} lines)...`);
       let targetHandle = fileHandles[cleanPath] ? fileHandles[cleanPath] : fileHandles[rawPath];
       let targetPath = targetHandle ? (fileHandles[cleanPath] ? cleanPath : rawPath) : cleanPath;
       if (!targetHandle) {
@@ -3629,13 +3768,15 @@ btnPull.addEventListener('click', async () => {
               if (seenPatches.has(sig)) continue;
               seenPatches.add(sig);
               foundBlocks++;
+              if (replaceStr && isPatchAlreadyInContent(currentContent, searchStr, replaceStr)) {
+                alreadyAppliedCount++;
+                continue;
+              }
               const replacedContent = fuzzyReplace(currentContent, searchStr, replaceStr);
               if (replacedContent !== null) {
                 appliedBlockPatches.push({ search: searchStr, replace: replaceStr });
                 currentContent = replacedContent;
                 appliedCount++;
-              } else if (replaceStr && isPatchAlreadyInContent(currentContent, replaceStr)) {
-                alreadyAppliedCount++;
               } else {
                 partialFails++;
                 if (!failedPatchFiles.includes(targetPath)) failedPatchFiles.push(targetPath);
@@ -3659,16 +3800,18 @@ btnPull.addEventListener('click', async () => {
               .replace(/\r\n/g, '\n')
               .split('\n')
               .filter(line => line.trim().length > 0);
-            const alreadyHasMarkers = nonEmptyLines.some(l => l.includes(START_MARKER)) && nonEmptyLines.some(l => l.includes(END_MARKER));
+            const bodyLines = nonEmptyLines.filter(line => !line.includes(START_MARKER) && !line.includes(END_MARKER));
             if (targetPath.endsWith('.json')) {
-              const cleanJsonLines = nonEmptyLines.filter(line => !line.includes(START_MARKER) && !line.includes(END_MARKER));
-              currentContent = cleanJsonLines.join('\n');
-            } else if (alreadyHasMarkers) {
-              currentContent = nonEmptyLines.join('\n');
+              currentContent = bodyLines.join('\n');
             } else {
               const startComment = getCommentWrappedDelimiter("START", targetPath);
               const endComment = getCommentWrappedDelimiter("END", targetPath);
-              currentContent = `${startComment}\n${nonEmptyLines.join('\n')}\n${endComment}`;
+              if (bodyLines.length > 0 && bodyLines[0].startsWith('#!')) {
+                const shebang = bodyLines.shift();
+                currentContent = `${shebang}\n${startComment}\n${bodyLines.join('\n')}\n${endComment}`;
+              } else {
+                currentContent = `${startComment}\n${bodyLines.join('\n')}\n${endComment}`;
+              }
             }
             regexScripts.forEach(line => {
               const parts = line.split(PIPE_CHAR);
@@ -3774,11 +3917,12 @@ async function finalizePullReport(savedWrites, unchangedList, failedList, notFou
   const headerColor = savedWrites.length > 0 ? "#a5d6a7" : (failedList.length > 0 ? "#ffb74d" : "#4fc3f7");
   const sendBtnHtml = `<button id="cb-btn-send-report" title="Send this report & any mismatched files to AI" style="background:#0288d1; color:#fff; border:none; padding:2px 6px; font-size:10px; border-radius:3px; cursor:pointer; margin-left:6px;">📤 Send Report</button>`;
   const summaryHtml = `<div style="display:flex; justify-content:space-between; align-items:center;"><span style="color:${headerColor}; font-weight:bold;">${headerTitle}</span>${sendBtnHtml}</div>` + statusParts.join('<br>');
-  statusDiv.style.textAlign = 'left';
-  statusDiv.style.lineHeight = '1.4';
-  statusDiv.setAttribute('data-pull-summary', summaryHtml);
-  statusDiv.innerHTML = summaryHtml;
-  statusDiv.title = tooltipParts.join('\n');
+  const liveStatus = document.getElementById('cb-status') || statusDiv;
+  liveStatus.style.textAlign = 'left';
+  liveStatus.style.lineHeight = '1.4';
+  liveStatus.setAttribute('data-pull-summary', summaryHtml);
+  liveStatus.innerHTML = summaryHtml;
+  liveStatus.title = tooltipParts.join('\n');
   const sendReportBtn = document.getElementById('cb-btn-send-report');
   if (sendReportBtn) {
     sendReportBtn.addEventListener('click', () => {
@@ -3806,7 +3950,12 @@ async function executePendingWrites() {
   const patchToggleLocal = document.getElementById('cb-patch-toggle').checked;
   let sessionDirHandle = null;
   let globalPatchContent = "";
-  for (const writeObj of pendingWrites) {
+  const totalWrites = pendingWrites.length;
+  for (let wIdx = 0; wIdx < totalWrites; wIdx++) {
+    const writeObj = pendingWrites[wIdx];
+    const lineCount = writeObj.currentContent.split('\n').length;
+    const writePct = Math.round(70 + ((wIdx + 1) / totalWrites) * 30);
+    await yieldUIStatus(`💾 [${writePct}%] Writing (${wIdx + 1}/${totalWrites}): ${writeObj.targetPath.split('/').pop()} (${lineCount} lines)...`);
     if (patchToggleLocal) globalPatchContent += writeObj.patch;
     if (!writeObj.isNewFile && backupToggleLocal && writeObj.originalContent.trim() !== '') {
       if (!sessionDirHandle) {
@@ -3835,6 +3984,42 @@ async function executePendingWrites() {
   const completedWrites = [...pendingWrites];
   pendingWrites = [];
   persistFileCheckboxState();
+  if (completedWrites.length > 0 && directoryHandle) {
+    const fallbackSummary = completedWrites.map(w => {
+      if (w.isNewFile) return `Create ${w.targetPath}`;
+      return w.isPatchMode ? `Update ${w.targetPath} (${w.changesCount} patch${w.changesCount === 1 ? '' : 'es'})` : `Replace ${w.targetPath}`;
+    }).join(', ');
+    const finalCommitMsg = window.lastExtractedCommitMsg ? window.lastExtractedCommitMsg : fallbackSummary;
+    const commitInputEl = document.getElementById('cb-git-commit-msg');
+    if (commitInputEl) {
+      commitInputEl.value = finalCommitMsg;
+      saveWorkspaceConfig();
+    }
+    try {
+      const commitsHandle = await directoryHandle.getFileHandle('anyai_commits.md', { create: true });
+      fileHandles['anyai_commits.md'] = commitsHandle;
+      const existingCommits = await (await commitsHandle.getFile()).text();
+      const nowIso = new Date().toISOString().replace('T', ' ').substring(0, 19) + ' UTC';
+      const roleLabel = currentAgentRole ? currentAgentRole : 'User/AI';
+      const filesBullets = completedWrites.map(w => {
+        const modeStr = w.isNewFile ? 'created' : (w.isPatchMode ? `${w.changesCount} patch${w.changesCount === 1 ? '' : 'es'}` : 'full replacement');
+        return `- \`${w.targetPath}\` (${modeStr})`;
+      }).join('\n');
+      const newEntry = `## ${nowIso} — ${finalCommitMsg}\n- **Agent:** ${roleLabel}\n${filesBullets}\n\n`;
+      const headerLine = "# AnyAIAgents Commit & Change History\n\n";
+      const bodyWithoutHeader = existingCommits.startsWith("# AnyAIAgents Commit")
+        ? existingCommits.replace(/^# AnyAIAgents Commit[^\n]*\n+/, '')
+        : existingCommits;
+      const updatedCommits = headerLine + newEntry + bodyWithoutHeader;
+      const cw = await commitsHandle.createWritable();
+      await cw.write(updatedCommits);
+      await cw.close();
+      fileSizes['anyai_commits.md'] = updatedCommits.length;
+    } catch (e) {}
+    window.lastExtractedCommitMsg = "";
+  }
+  if (completedWrites.some(w => w.targetPath === 'anyai_roles.md')) await parseRolesFile();
+  if (completedWrites.some(w => w.targetPath === 'anyai_snippets.md')) await parseSnippetsFile();
   const unchangedList = window.lastUnchangedFiles ? window.lastUnchangedFiles : [];
   const failedList = window.lastFailedPatchFiles ? window.lastFailedPatchFiles : [];
   await finalizePullReport(completedWrites, unchangedList, failedList, 0);

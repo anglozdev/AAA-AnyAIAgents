@@ -147,6 +147,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
             let authTabId = null;
             let authWindowId = null;
             let isResolved = false;
+            let isRedirectCaptured = false;
             const cleanupAndResolve = (payload) => {
                 if (isResolved) return;
                 isResolved = true;
@@ -160,9 +161,11 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
                 });
             };
             const onTabUpdated = async (tabId, changeInfo, tab) => {
+                if (isRedirectCaptured) return;
                 if (tabId !== authTabId && (!tab || tab.windowId !== authWindowId)) return;
                 const currentUrl = changeInfo.url || (tab && tab.url) || "";
                 if (!currentUrl.startsWith(redirectUri)) return;
+                isRedirectCaptured = true;
                 chrome.tabs.remove(tabId).catch(() => {});
                 try {
                     const hashIndex = currentUrl.indexOf('#');
@@ -228,7 +231,7 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
                 }
             };
             const onTabRemoved = (tabId) => {
-                if (tabId === authTabId && !isResolved) {
+                if (tabId === authTabId && !isResolved && !isRedirectCaptured) {
                     cleanupAndResolve({
                         success: false,
                         error: `OAuth failed/closed. Sent redirect_uri=${redirectUri} | client_id=${clientId.substring(0, 14)}...`

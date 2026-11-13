@@ -7,7 +7,7 @@
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
-#codebridge-sidebar, #cb-diff-modal, #cb-merge-modal, #cb-sessions-modal, #cb-gas-manual-modal {
+#codebridge-sidebar, #cb-diff-modal, #cb-merge-modal, #cb-sessions-modal, #cb-gas-manual-modal, #cb-file-preview-modal, #cb-file-action-menu {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
   font-size: 12px !important;
   line-height: 1.35 !important;
@@ -18,7 +18,7 @@
   box-sizing: border-box !important;
   -webkit-font-smoothing: antialiased !important;
 }
-#codebridge-sidebar *, #cb-diff-modal *, #cb-merge-modal *, #cb-sessions-modal *, #cb-gas-manual-modal * {
+#codebridge-sidebar *, #cb-diff-modal *, #cb-merge-modal *, #cb-sessions-modal *, #cb-gas-manual-modal *, #cb-file-action-menu * {
   font-family: inherit !important;
   line-height: 1.35 !important;
   letter-spacing: normal !important;
