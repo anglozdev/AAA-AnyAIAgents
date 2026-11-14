@@ -86,7 +86,7 @@ function isMergedFileName(path) {
 // --------------------------------------------------------
 function isInternalMetaFile(path) {
   if (!path) return false;
-  return ['anyai_snippets.md', 'anyai_roles.md', 'anyai_activity.csv', 'anyai_commits.md', '.anyai_session.md', 'file_list.txt'].includes(path) ? true : isMergedFileName(path);
+  return ['anyai_snippets.md', 'anyai_roles.md', 'anyai_activity.csv', 'anyai_commits.md', '.anyai_session.md', 'file_list.txt', '_deploy_log.txt'].includes(path) ? true : isMergedFileName(path);
 }
 // --------------------------------------------------------
 function isSpecificSessionUrl(pathname) {
@@ -460,8 +460,9 @@ sidebar.innerHTML = [
   '    <input type="text" id="cb-git-path" placeholder="Repo subfolder (optional, e.g. public)">',
   '    <input type="text" id="cb-git-commit-msg" placeholder="Commit message..." value="AAA Update">',
   '    <div style="display: flex; gap: 5px;">',
-  '      <button id="cb-btn-pull-git" title="Pull files from GitHub branch into local workspace" style="flex: 1; font-size: 11px; padding: 6px;">⬇️ Pull Repo</button>',
-  '      <button id="cb-btn-push-git" title="Commit and push local workspace files to GitHub" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push Commit</button>',
+  '      <button id="cb-btn-pull-git" title="Pull files from GitHub branch into local workspace" style="flex: 1; font-size: 11px; padding: 6px;">⬇️ Pull</button>',
+  '      <button id="cb-btn-pull-log" title="Pull _deploy_log.txt from GitHub and attach to AI session without sending" style="flex: 1; font-size: 11px; padding: 6px; background: #0288d1;">🪵 Pull Log</button>',
+  '      <button id="cb-btn-push-git" title="Commit and push local workspace files to GitHub" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push</button>',
   '    </div>',
   '  </div>',
   '</details>',
@@ -2193,7 +2194,8 @@ async function pushToGitHub() {
       'anyai_roles.md',
       'anyai_snippets.md',
       'anyai_instructions.md',
-      'file_list.txt'
+      'file_list.txt',
+      '_deploy_log.txt'
     ];
     function isIgnoredByGitignore(filePath) {
       if (hardExcluded.includes(filePath) || hardExcluded.includes(filePath.split('/').pop())) return true;
@@ -2348,6 +2350,89 @@ async function pullFromGitHub() {
   }
 }
 document.getElementById('cb-btn-pull-git').addEventListener('click', pullFromGitHub);
+// --------------------------------------------------------
+async function pullDeployLogFromGitHub() {
+  const token = document.getElementById('cb-git-token').value.trim();
+  const repo = repoSelect.value;
+  const branch = document.getElementById('cb-git-branch').value.trim() || 'main';
+  const rawSubPath = (document.getElementById('cb-git-path') ? document.getElementById('cb-git-path').value : '').trim().replace(/^\/+|\/+$/g, '');
+  if (!token ? true : (!repo ? true : repo === '__CREATE__')) {
+    statusDiv.textContent = "❌ Missing GitHub PAT or Repo.";
+    return;
+  }
+  const headers = {
+    'Authorization': `token ${token}`,
+    'Accept': 'application/vnd.github.v3+json'
+  };
+  const candidatePaths = rawSubPath ? [`${rawSubPath}/_deploy_log.txt`, `_deploy_log.txt`] : [`_deploy_log.txt`];
+  let fileData = null;
+  let foundRemotePath = "";
+  statusDiv.textContent = `⏳ Fetching _deploy_log.txt from ${repo}@${branch}...`;
+  try {
+    for (const remotePath of candidatePaths) {
+      const url = `https://api.github.com/repos/${repo}/contents/${remotePath}?ref=${encodeURIComponent(branch)}&_t=${Date.now()}`;
+      const res = await fetch(url, { headers, cache: 'no-store' });
+      if (res.ok) {
+        fileData = await res.json();
+        foundRemotePath = remotePath;
+        break;
+      }
+    }
+    if (!fileData || !fileData.content) {
+      throw new Error(`_deploy_log.txt not found in ${candidatePaths.join(' or ')} on branch "${branch}".`);
+    }
+    const base64Clean = fileData.content.replace(/\s/g, '');
+    const binaryStr = atob(base64Clean);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+    const logText = new TextDecoder('utf-8').decode(bytes);
+    let fileObj = null;
+    if (directoryHandle) {
+      const logHandle = await directoryHandle.getFileHandle('_deploy_log.txt', { create: true });
+      const writable = await logHandle.createWritable();
+      await writable.write(logText);
+      await writable.close();
+      fileHandles['_deploy_log.txt'] = logHandle;
+      fileSizes['_deploy_log.txt'] = logText.length;
+      logAndTrackFile("Git Pull Log", foundRemotePath);
+      fileObj = await logHandle.getFile();
+    } else {
+      fileObj = new File([logText], '_deploy_log.txt', { type: 'text/plain' });
+    }
+    const provider = getAIProvider();
+    const promptEl = document.getElementById('cb-prompt');
+    if (provider === 'chatgpt') {
+      const startTag = getCommentWrappedDelimiter("START", "_deploy_log.txt");
+      const endTag = getCommentWrappedDelimiter("END", "_deploy_log.txt");
+      const block = `${startTag}\n${logText.trim()}\n${endTag}`;
+      if (promptEl) {
+        promptEl.value = promptEl.value.trim() ? `${promptEl.value.trim()}\n\n${block}` : block;
+        promptEl.focus();
+      }
+      statusDiv.textContent = `🪵 Pulled ${foundRemotePath} into prompt box! Add your comments & click Send.`;
+      return;
+    }
+    const inputBox = findChatInputBox();
+    if (!inputBox) {
+      statusDiv.textContent = `✅ Saved _deploy_log.txt locally, but AI chat input box was not found.`;
+      return;
+    }
+    const dataTransfer = new DataTransfer();
+    dataTransfer.items.add(fileObj);
+    if (provider === 'gemini') {
+      inputBox.focus();
+      inputBox.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dataTransfer, bubbles: true, cancelable: true, composed: true }));
+    } else {
+      attachNativeOrPasteFiles(inputBox, dataTransfer);
+    }
+    if (promptEl) promptEl.focus();
+    statusDiv.textContent = `🪵 Attached ${foundRemotePath} (${(logText.length / 1024).toFixed(1)}KB)! Write comments & click Send.`;
+    showCbToast(`🪵 Attached _deploy_log.txt from ${foundRemotePath}`);
+  } catch (e) {
+    statusDiv.textContent = `❌ Pull Log Error: ${e.message}`;
+  }
+}
+document.getElementById('cb-btn-pull-log').addEventListener('click', pullDeployLogFromGitHub);
 // --------------------------------------------------------
 // GOOGLE APPS SCRIPT SYNC ENGINE & IN-PAGE GUIDE MODAL
 // --------------------------------------------------------
