@@ -215,13 +215,26 @@ function buildCommentSuffixPattern() {
   return "[ \\t]*(?:-->" + OR_OP + "\\*\\/)?[ \\t]*";
 }
 // --------------------------------------------------------
+function normalizeGluedDelimiters(text) {
+  let s = text.replace(/\r\n/g, '\n');
+  const openEsc = DELIM_OPEN;
+  const closeEsc = DELIM_CLOSE;
+  const markerPattern = new RegExp(
+    "((?:\\/\\/|#|<!--|\\/\\*|--|%|REM\\b|::)?[ \\t]*" + openEsc + "\\s*(?:START|END):\\s*[^\\n]+?\\s*" + closeEsc + "[ \\t]*(?:-->|\\*\\/)?)",
+    "g"
+  );
+  s = s.replace(markerPattern, "\n$1\n");
+  s = s.replace(/((?:\/\/|#|--)[ \t]*[-=_*]{6,})([^\n\r-=_*])/g, "$1\n$2");
+  return s.replace(/\n{2,}/g, '\n');
+}
+// --------------------------------------------------------
 function parseAiFileBlocks(rawText, stripAccidentalFences = true) {
   const files = {};
   const incomplete = [];
   if (!rawText ? true : typeof rawText !== 'string') {
     return { files: files, incomplete: incomplete, hasErrors: false };
   }
-  const normalizedText = rawText.replace(/\r\n/g, '\n');
+  const normalizedText = normalizeGluedDelimiters(rawText);
   const commentPrefix = buildCommentPrefixPattern();
   const commentSuffix = buildCommentSuffixPattern();
   const completePattern = "^" + commentPrefix + DELIM_OPEN + "\\s*START:\\s*([^\\n]+?)\\s*" + DELIM_CLOSE + commentSuffix + "\\n([\\s\\S]*?)^" + commentPrefix + DELIM_OPEN + "\\s*END:\\s*\\1\\s*" + DELIM_CLOSE + commentSuffix;
@@ -3713,11 +3726,18 @@ btnPull.addEventListener('click', async () => {
       let targetPath = targetHandle ? (fileHandles[cleanPath] ? cleanPath : rawPath) : cleanPath;
       if (!targetHandle) {
         const strippedName = targetPath.replace(new RegExp("(?:\\s*\\(\\d+\\)" + OR_OP + "_\\d+)(\\.[^.]+)$"), '$1');
+        const hasExplicitFolder = targetPath.includes('/');
         const baseName = targetPath.split('/').pop();
         const possibleKeys = Object.keys(fileHandles).filter(k =>
-          [k === targetPath, k.endsWith('/' + targetPath), k === strippedName, k.endsWith('/' + strippedName), k.split('/').pop() === baseName].some(Boolean)
+          [
+            k === targetPath,
+            k.endsWith('/' + targetPath),
+            k === strippedName,
+            k.endsWith('/' + strippedName),
+            !hasExplicitFolder && k.split('/').pop() === baseName
+          ].some(Boolean)
         );
-        if (possibleKeys.length >= 1) {
+        if (possibleKeys.length === 1) {
           targetPath = possibleKeys[0];
           targetHandle = fileHandles[targetPath];
         }
