@@ -65,39 +65,63 @@ if (!window.__AAA_WEB_WORKER_LOADED__) {
     });
   }
   // --------------------------------------------------------
+  function getCleanInnerText(el) {
+    if (!el) return "";
+    const prevDisplay = qaPanel ? qaPanel.style.display : null;
+    if (qaPanel && qaPanel.contains(el)) return "";
+    if (qaPanel && el.contains(qaPanel)) {
+      qaPanel.style.display = "none";
+    }
+    try {
+      return (el.innerText || el.textContent || "").trim();
+    } finally {
+      if (qaPanel && prevDisplay !== null) {
+        qaPanel.style.display = prevDisplay;
+      }
+    }
+  }
+  // --------------------------------------------------------
+  function queryOutsideQaPanel(selector) {
+    const all = document.querySelectorAll(selector);
+    for (let i = 0; i < all.length; i++) {
+      if (!qaPanel || !qaPanel.contains(all[i])) return all[i];
+    }
+    return null;
+  }
+  // --------------------------------------------------------
   function executeDomCommand(command, selector) {
     const cleanSelector = (selector || "body").trim();
     if (command === "odoo_error") {
       expandOdooErrorDetails(document);
-      const modal = document.querySelector(".o_error_dialog, .o_technical_modal .modal-content, .modal-dialog .modal-content");
+      const modal = queryOutsideQaPanel(".o_error_dialog, .o_technical_modal .modal-content, .modal-dialog .modal-content");
       if (!modal) throw new Error("No active Odoo error modal (.o_error_dialog / .modal-content) found on page.");
-      return modal.innerText.trim().substring(0, 15000);
+      return getCleanInnerText(modal).substring(0, 15000);
     }
     if (command === "odoo_logs") {
-      const logEl = document.querySelector("#odoo-log, pre, body");
+      const logEl = queryOutsideQaPanel("#odoo-log, pre") || document.body;
       if (!logEl) throw new Error("No log container found on page.");
-      const raw = logEl.innerText.trim();
+      const raw = getCleanInnerText(logEl);
       return raw.length > 15000 ? raw.substring(raw.length - 15000) : raw;
     }
     if (command === "read_text") {
       if (cleanSelector.includes("o_error_dialog") || cleanSelector.includes("modal")) {
         expandOdooErrorDetails(document);
       }
-      const el = cleanSelector !== "body" ? document.querySelector(cleanSelector) : document.body;
+      const el = cleanSelector !== "body" ? queryOutsideQaPanel(cleanSelector) : document.body;
       if (!el) throw new Error("Selector not found: " + cleanSelector);
-      const text = (el.innerText || el.textContent || "").trim();
+      const text = getCleanInnerText(el);
       return text.substring(0, 15000);
     }
     if (command === "click") {
-      const el = document.querySelector(cleanSelector);
+      const el = queryOutsideQaPanel(cleanSelector);
       if (!el) throw new Error("Selector not found: " + cleanSelector);
       el.click();
       return "Clicked successfully: " + cleanSelector;
     }
     if (command === "extract") {
-      const elements = document.querySelectorAll(cleanSelector);
+      const elements = Array.from(document.querySelectorAll(cleanSelector)).filter(e => !qaPanel || !qaPanel.contains(e));
       if (elements.length === 0) throw new Error("No elements found for: " + cleanSelector);
-      return Array.from(elements).map(e => (e.innerText || e.textContent || "").trim()).filter(Boolean).join("\n---\n").substring(0, 15000);
+      return elements.map(e => getCleanInnerText(e)).filter(Boolean).join("\n---\n").substring(0, 15000);
     }
     throw new Error("Unknown command: " + command);
   }
