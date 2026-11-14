@@ -732,7 +732,7 @@ function buildLiveHighlightedEditorDOM(doc, initialText, onTextChange, onSaveSho
   stage.appendChild(textarea);
   wrap.appendChild(gutter);
   wrap.appendChild(stage);
-  return { wrap, textarea, syncRender };
+  return { wrap, gutter, stage, highlightPre, textarea, syncRender };
 }
 // --------------------------------------------------------
 function showFilePreviewModal(filePath, fileObj, isImage, textContent, startInEditMode = false) {
@@ -914,13 +914,20 @@ function populateInteractiveEditorTab(win, filePath, initialText) {
     },
     () => triggerTabSave()
   );
-  editorObj.wrap.style.height = 'auto';
-  editorObj.wrap.style.border = 'none';
-  editorObj.wrap.style.borderRadius = '0';
+  editorObj.wrap.style.cssText = 'display:flex;flex:1;width:100%;height:calc(100vh - 49px);min-height:0;background:#111;border:none;border-radius:0;overflow:hidden;font-family:Consolas,Monaco,"Courier New",monospace;position:relative;';
+  editorObj.stage.style.cssText = 'position:relative;flex:1;height:100%;min-height:0;overflow:hidden;background:#111;';
+  editorObj.gutter.style.height = '100%';
   editorRef = editorObj.textarea;
   btnSave.addEventListener('click', triggerTabSave);
   doc.body.appendChild(editorObj.wrap);
-  setTimeout(() => editorRef.focus(), 50);
+  setTimeout(() => {
+    editorRef.setSelectionRange(0, 0);
+    editorRef.focus({ preventScroll: true });
+    editorRef.scrollTop = 0;
+    editorObj.highlightPre.scrollTop = 0;
+    editorObj.gutter.scrollTop = 0;
+    win.scrollTo(0, 0);
+  }, 50);
 }
 // --------------------------------------------------------
 function showFileActionMenu(filePath, anchorX, anchorY) {
