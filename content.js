@@ -86,7 +86,7 @@ function isMergedFileName(path) {
 // --------------------------------------------------------
 function isInternalMetaFile(path) {
   if (!path) return false;
-  return ['anyai_snippets.md', 'anyai_roles.md', 'anyai_activity.csv', 'anyai_commits.md', '.anyai_session.md', 'file_list.txt', '_deploy_log.txt'].includes(path) ? true : isMergedFileName(path);
+  return ['anyai_snippets.md', 'anyai_roles.md', 'anyai_activity.csv', 'anyai_commits.md', '.anyai_session.md', 'file_list.txt', 'deploy_status.md'].includes(path) ? true : isMergedFileName(path);
 }
 // --------------------------------------------------------
 function isSpecificSessionUrl(pathname) {
@@ -461,7 +461,7 @@ sidebar.innerHTML = [
   '    <input type="text" id="cb-git-commit-msg" placeholder="Commit message..." value="AAA Update">',
   '    <div style="display: flex; gap: 5px;">',
   '      <button id="cb-btn-pull-git" title="Pull files from GitHub branch into local workspace" style="flex: 1; font-size: 11px; padding: 6px;">⬇️ Pull</button>',
-  '      <button id="cb-btn-pull-log" title="Pull _deploy_log.txt from GitHub and attach to AI session without sending" style="flex: 1; font-size: 11px; padding: 6px; background: #0288d1;">🪵 Pull Log</button>',
+  '      <button id="cb-btn-pull-log" title="Pull deploy_status.md from GitHub and attach to AI session without sending" style="flex: 1; font-size: 11px; padding: 6px; background: #0288d1;">🪵 Pull Log</button>',
   '      <button id="cb-btn-push-git" title="Commit and push local workspace files to GitHub" style="flex: 1; font-size: 11px; padding: 6px;">⬆️ Push</button>',
   '    </div>',
   '  </div>',
@@ -638,9 +638,9 @@ function highlightSyntaxTokensOnly(rawText) {
     "\\b(\\d+(?:\\.\\d+)?)\\b"
   ].join(OR_OP), "g");
   return esc.replace(tokenRx, (m, cMulti, cSingle, str, kw, num) => {
-    if (cMulti || cSingle) return `<span style="color:#6a9955;font-style:italic;">${m}</span>`;
+    if (cMulti || cSingle) return `<span style="color:#6a9955;">${m}</span>`;
     if (str) return `<span style="color:#ce9178;">${m}</span>`;
-    if (kw) return `<span style="color:#569cd6;font-weight:bold;">${m}</span>`;
+    if (kw) return `<span style="color:#569cd6;">${m}</span>`;
     if (num) return `<span style="color:#b5cea8;">${m}</span>`;
     return m;
   });
@@ -677,11 +677,12 @@ function buildLiveHighlightedEditorDOM(doc, initialText, onTextChange, onSaveSho
   gutter.style.cssText = 'width:48px;height:100%;background:#181818;color:#666;text-align:right;padding:12px 8px 12px 4px;border-right:1px solid #2a2a2a;user-select:none;overflow:hidden;font-size:13px;line-height:1.5;white-space:pre;flex-shrink:0;';
   const stage = doc.createElement('div');
   stage.style.cssText = 'position:relative;flex:1;height:100%;min-height:420px;overflow:hidden;background:#111;';
-  const sharedFontCss = 'position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:12px;border:none;font-family:Consolas,Monaco,"Courier New",monospace !important;font-size:13px !important;line-height:1.5 !important;white-space:pre;overflow:auto;box-sizing:border-box;tab-size:2;';
+  const sharedFontCss = 'position:absolute;top:0;left:0;width:100%;height:100%;margin:0;padding:12px;border:none;font-family:Consolas,Monaco,"Courier New",monospace !important;font-size:13px !important;line-height:1.5 !important;letter-spacing:0px !important;word-spacing:0px !important;font-weight:normal !important;font-style:normal !important;font-variant-ligatures:none !important;white-space:pre !important;word-wrap:normal !important;overflow-wrap:normal !important;overflow:auto;box-sizing:border-box;tab-size:2;';
   const highlightPre = doc.createElement('pre');
   highlightPre.style.cssText = sharedFontCss + 'color:#d4d4d4;pointer-events:none;z-index:1;background:transparent;display:block;';
   const textarea = doc.createElement('textarea');
   textarea.spellcheck = false;
+  textarea.setAttribute('wrap', 'off');
   textarea.value = initialText || '';
   textarea.style.cssText = sharedFontCss + 'color:transparent;-webkit-text-fill-color:transparent;background:transparent;caret-color:#4fc3f7;resize:none;outline:none;z-index:2;display:block;';
   let usePlainTextFallback = false;
@@ -2202,7 +2203,7 @@ async function pushToGitHub() {
       'anyai_snippets.md',
       'anyai_instructions.md',
       'file_list.txt',
-      '_deploy_log.txt'
+      'deploy_status.md'
     ];
     function isIgnoredByGitignore(filePath) {
       if (hardExcluded.includes(filePath) || hardExcluded.includes(filePath.split('/').pop())) return true;
@@ -2371,10 +2372,10 @@ async function pullDeployLogFromGitHub() {
     'Authorization': `token ${token}`,
     'Accept': 'application/vnd.github.v3+json'
   };
-  const candidatePaths = rawSubPath ? [`${rawSubPath}/_deploy_log.txt`, `_deploy_log.txt`] : [`_deploy_log.txt`];
+  const candidatePaths = rawSubPath ? [`${rawSubPath}/deploy_status.md`, `deploy_status.md`] : [`deploy_status.md`];
   let fileData = null;
   let foundRemotePath = "";
-  statusDiv.textContent = `⏳ Fetching _deploy_log.txt from ${repo}@${branch}...`;
+  statusDiv.textContent = `⏳ Fetching deploy_status.md from ${repo}@${branch}...`;
   try {
     for (const remotePath of candidatePaths) {
       const url = `https://api.github.com/repos/${repo}/contents/${remotePath}?ref=${encodeURIComponent(branch)}&_t=${Date.now()}`;
@@ -2386,7 +2387,7 @@ async function pullDeployLogFromGitHub() {
       }
     }
     if (!fileData || !fileData.content) {
-      throw new Error(`_deploy_log.txt not found in ${candidatePaths.join(' or ')} on branch "${branch}".`);
+      throw new Error(`deploy_status.md not found in ${candidatePaths.join(' or ')} on branch "${branch}".`);
     }
     const base64Clean = fileData.content.replace(/\s/g, '');
     const binaryStr = atob(base64Clean);
@@ -2395,22 +2396,22 @@ async function pullDeployLogFromGitHub() {
     const logText = new TextDecoder('utf-8').decode(bytes);
     let fileObj = null;
     if (directoryHandle) {
-      const logHandle = await directoryHandle.getFileHandle('_deploy_log.txt', { create: true });
+      const logHandle = await directoryHandle.getFileHandle('deploy_status.md', { create: true });
       const writable = await logHandle.createWritable();
       await writable.write(logText);
       await writable.close();
-      fileHandles['_deploy_log.txt'] = logHandle;
-      fileSizes['_deploy_log.txt'] = logText.length;
+      fileHandles['deploy_status.md'] = logHandle;
+      fileSizes['deploy_status.md'] = logText.length;
       logAndTrackFile("Git Pull Log", foundRemotePath);
       fileObj = await logHandle.getFile();
     } else {
-      fileObj = new File([logText], '_deploy_log.txt', { type: 'text/plain' });
+      fileObj = new File([logText], 'deploy_status.md', { type: 'text/markdown' });
     }
     const provider = getAIProvider();
     const promptEl = document.getElementById('cb-prompt');
     if (provider === 'chatgpt') {
-      const startTag = getCommentWrappedDelimiter("START", "_deploy_log.txt");
-      const endTag = getCommentWrappedDelimiter("END", "_deploy_log.txt");
+      const startTag = getCommentWrappedDelimiter("START", "deploy_status.md");
+      const endTag = getCommentWrappedDelimiter("END", "deploy_status.md");
       const block = `${startTag}\n${logText.trim()}\n${endTag}`;
       if (promptEl) {
         promptEl.value = promptEl.value.trim() ? `${promptEl.value.trim()}\n\n${block}` : block;
@@ -2421,7 +2422,7 @@ async function pullDeployLogFromGitHub() {
     }
     const inputBox = findChatInputBox();
     if (!inputBox) {
-      statusDiv.textContent = `✅ Saved _deploy_log.txt locally, but AI chat input box was not found.`;
+      statusDiv.textContent = `✅ Saved deploy_status.md locally, but AI chat input box was not found.`;
       return;
     }
     const dataTransfer = new DataTransfer();
@@ -2434,7 +2435,7 @@ async function pullDeployLogFromGitHub() {
     }
     if (promptEl) promptEl.focus();
     statusDiv.textContent = `🪵 Attached ${foundRemotePath} (${(logText.length / 1024).toFixed(1)}KB)! Write comments & click Send.`;
-    showCbToast(`🪵 Attached _deploy_log.txt from ${foundRemotePath}`);
+    showCbToast(`🪵 Attached deploy_status.md from ${foundRemotePath}`);
   } catch (e) {
     statusDiv.textContent = `❌ Pull Log Error: ${e.message}`;
   }
