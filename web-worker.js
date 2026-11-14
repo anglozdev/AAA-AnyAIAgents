@@ -412,10 +412,19 @@ if (!window.__AAA_WEB_WORKER_LOADED__) {
     });
     return qaPanel;
   }
+  function isAiHostPage() {
+    if (window.__AAA_CONTENT_SCRIPT_ACTIVE__ || document.getElementById("codebridge-sidebar")) return true;
+    const h = window.location.hostname.toLowerCase();
+    return ["gemini", "chatgpt", "openai", "claude", "perplexity", "deepseek", "qwen", "kimi", "moonshot", "doubao", "huggingface"].some(k => h.includes(k));
+  }
   // --------------------------------------------------------
   // RUNTIME MESSAGE LISTENER (PANEL TOGGLE + AI RPA COMMANDS + DMs)
   // --------------------------------------------------------
   chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+    if (!request || !request.action) return false;
+    if (isAiHostPage() && request.action !== "execute_dom_action") {
+      return false;
+    }
     if (request.action === "toggle_qa_panel") {
       buildQaPanel();
       isQaPanelOpen = !isQaPanelOpen;
@@ -465,6 +474,7 @@ if (!window.__AAA_WEB_WORKER_LOADED__) {
       sendResponse({ role: currentRole || "Worker_QA", status: isQaActive ? "active" : "stopped" });
       return true;
     }
+    return false;
   });
 }
 // <<<<=== END: web-worker.js ===>>>>

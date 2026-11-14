@@ -7,10 +7,44 @@
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
  */
+function isAiProviderUrl(urlStr) {
+    if (!urlStr) return false;
+    const lower = urlStr.toLowerCase();
+    return [
+        "gemini.google.com",
+        "chatgpt.com",
+        "openai.com",
+        "claude.ai",
+        "perplexity.ai",
+        "deepseek.com",
+        "qwen.ai",
+        "aliyun.com",
+        "kimi.moonshot.cn",
+        "kimi.com",
+        "doubao.com",
+        "huggingface.co"
+    ].some(domain => lower.includes(domain));
+}
+// --------------------------------------------------------
 chrome.action.onClicked.addListener((tab) => {
     if (!tab || !tab.id) return;
-    chrome.tabs.sendMessage(tab.id, { action: "toggle_sidebar" }).catch(() => {
-        chrome.tabs.sendMessage(tab.id, { action: "toggle_qa_panel" }).catch(() => {
+    if (isAiProviderUrl(tab.url)) {
+        chrome.tabs.sendMessage(tab.id, { action: "toggle_sidebar" }, (res) => {
+            if (chrome.runtime.lastError || !res) {
+                if (chrome.scripting) {
+                    chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["sidebar.css"] }).catch(() => {});
+                    chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["content.js"] }).then(() => {
+                        setTimeout(() => {
+                            chrome.tabs.sendMessage(tab.id, { action: "toggle_sidebar" }).catch(() => {});
+                        }, 120);
+                    }).catch(err => console.log("AI sidebar script injection failed:", err));
+                }
+            }
+        });
+        return;
+    }
+    chrome.tabs.sendMessage(tab.id, { action: "toggle_qa_panel" }, (res) => {
+        if (chrome.runtime.lastError || !res) {
             if (chrome.scripting) {
                 chrome.scripting.executeScript({
                     target: { tabId: tab.id },
@@ -21,7 +55,7 @@ chrome.action.onClicked.addListener((tab) => {
                     }, 100);
                 }).catch(err => console.log("QA script injection unavailable:", err));
             }
-        });
+        }
     });
 });
 let activeAgents = {}; // Format: tabId -> { workspace, role, status }
