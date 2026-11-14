@@ -220,10 +220,13 @@ function normalizeGluedDelimiters(text) {
   const openEsc = DELIM_OPEN;
   const closeEsc = DELIM_CLOSE;
   const markerPattern = new RegExp(
-    "((?:\\/\\/|#|<!--|\\/\\*|--|%|REM\\b|::)?[ \\t]*" + openEsc + "\\s*(?:START|END):\\s*[^\\n]+?\\s*" + closeEsc + "[ \\t]*(?:-->|\\*\\/)?)",
+    "(`?)((?:\\/\\/|#|<!--|\\/\\*|--|%|REM\\b|::)?[ \\t]*" + openEsc + "\\s*(?:START|END):\\s*[^\\n`]+?\\s*" + closeEsc + "[ \\t]*(?:-->|\\*\\/)?)(`?)",
     "g"
   );
-  s = s.replace(markerPattern, "\n$1\n");
+  s = s.replace(markerPattern, (full, leadTick, marker, trailTick) => {
+    if (leadTick === '`' || trailTick === '`') return full;
+    return "\n" + marker + "\n";
+  });
   s = s.replace(/((?:\/\/|#|--)[ \t]*[-=_*]{6,})([^\n\r-=_*])/g, "$1\n$2");
   return s.replace(/\n{2,}/g, '\n');
 }
@@ -3716,8 +3719,9 @@ function isValidTargetFilename(path) {
   if (invalidCharsRegex.test(path)) return false;
   if (/\s/.test(path)) return false;
   const lower = path.toLowerCase();
-  if (['path/to/filename.ext', 'filename.ext', 'folder/subfolder/file.js', 'full/path/to/file.ext', 'path/file.ext', 'path/file.js', 'path/file.html', 'path/file.py', 'path/file.css', 'file.js', 'filename', 'path'].includes(lower)) return false;
-  if (/^file\d*\.js$/i.test(lower)) return false;
+  if (lower.startsWith('path/to/') || lower.startsWith('full/path/to/') || lower.startsWith('folder/subfolder/')) return false;
+  if (['path/to/filename.ext', 'filename.ext', 'folder/subfolder/file.js', 'full/path/to/file.ext', 'path/file.ext', 'path/file.js', 'path/file.html', 'path/file.py', 'path/file.css', 'path/file.xml', 'file.js', 'file.xml', 'filename', 'path'].includes(lower)) return false;
+  if (/^file\d*\.(?:js|py|xml|ext)$/i.test(lower)) return false;
   const baseName = path.split('/').pop();
   return baseName.includes('.');
 }
@@ -3919,9 +3923,9 @@ btnPull.addEventListener('click', async () => {
             } else {
               const startComment = getCommentWrappedDelimiter("START", targetPath);
               const endComment = getCommentWrappedDelimiter("END", targetPath);
-              if (bodyLines.length > 0 && bodyLines[0].startsWith('#!')) {
-                const shebang = bodyLines.shift();
-                currentContent = `${shebang}\n${startComment}\n${bodyLines.join('\n')}\n${endComment}`;
+              if (bodyLines.length > 0 && (bodyLines[0].startsWith('#!') || bodyLines[0].trim().startsWith('<?xml'))) {
+                const firstHeaderLine = bodyLines.shift();
+                currentContent = `${firstHeaderLine}\n${startComment}\n${bodyLines.join('\n')}\n${endComment}`;
               } else {
                 currentContent = `${startComment}\n${bodyLines.join('\n')}\n${endComment}`;
               }
