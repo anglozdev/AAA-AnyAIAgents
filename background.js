@@ -8,7 +8,21 @@
  * (at your option) any later version.
  */
 chrome.action.onClicked.addListener((tab) => {
-    chrome.tabs.sendMessage(tab.id, { action: "toggle_sidebar" }).catch(err => console.log("Content script not ready"));
+    if (!tab || !tab.id) return;
+    chrome.tabs.sendMessage(tab.id, { action: "toggle_sidebar" }).catch(() => {
+        chrome.tabs.sendMessage(tab.id, { action: "toggle_qa_panel" }).catch(() => {
+            if (chrome.scripting) {
+                chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    files: ["web-worker.js"]
+                }).then(() => {
+                    setTimeout(() => {
+                        chrome.tabs.sendMessage(tab.id, { action: "toggle_qa_panel" }).catch(() => {});
+                    }, 100);
+                }).catch(err => console.log("QA script injection unavailable:", err));
+            }
+        });
+    });
 });
 let activeAgents = {}; // Format: tabId -> { workspace, role, status }
 chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
@@ -62,6 +76,11 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
     if (req.action === "get_workspace_statuses") {
         chrome.tabs.query({}, (tabs) => {
             let statuses = {};
+            Object.values(activeAgents).forEach(ag => {
+                if (ag && ag.workspace === req.workspace && ag.role) {
+                    statuses[ag.role] = ag.status || "active";
+                }
+            });
             tabs.forEach(tab => {
                 if (tab.title && tab.title.includes(` - ${req.workspace} - `)) {
                     const parts = tab.title.split(' - ');
@@ -73,6 +92,54 @@ chrome.runtime.onMessage.addListener((req, sender, sendResponse) => {
             sendResponse({ success: true, statuses: statuses });
         });
         return true; 
+    }
+    // DISCOVER ACTIVE WORKSPACES ACROSS TABS FOR WORKER_QA PANEL
+    if (req.action === "get_active_workspaces") {
+        chrome.tabs.query({}, (tabs) => {
+            const wsSet = new Set();
+            Object.values(activeAgents).forEach(ag => {
+                if (ag && ag.workspace && ag.workspace !== "default") wsSet.add(ag.workspace);
+            });
+            tabs.forEach(tab => {
+                if (tab.title && tab.title.includes(" - ")) {
+                    const parts = tab.title.split(" - ");
+                    if (parts.length >= 3 && ["active", "stopped"].includes(parts[2].trim())) {
+                        wsSet.add(parts[1].trim());
+                    }
+                }
+            });
+            sendResponse({ success: true, workspaces: Array.from(wsSet) });
+        });
+        return true;
+    }
+    // CROSS-TAB RPA WEB COMMAND BRIDGE (AI TAB -> WEB-WORKER TAB)
+    if (req.action === "web_command") {
+        const targetUrl = (req.url || "").trim().toLowerCase();
+        chrome.tabs.query({}, (tabs) => {
+            let targetTab = tabs.find(t => t.url && targetUrl && t.url.toLowerCase().includes(targetUrl));
+            if (!targetTab) {
+                const qaEntry = Object.entries(activeAgents).find(([, data]) => data.role === "Worker_QA");
+                if (qaEntry) {
+                    targetTab = tabs.find(t => t.id === parseInt(qaEntry[0], 10));
+                }
+            }
+            if (!targetTab) {
+                sendResponse({ success: false, error: `No open browser tab matching "${req.url}" (or registered as Worker_QA) found.` });
+                return;
+            }
+            chrome.tabs.sendMessage(targetTab.id, {
+                action: "execute_dom_action",
+                command: req.command,
+                selector: req.selector
+            }, (res) => {
+                if (chrome.runtime.lastError || !res) {
+                    sendResponse({ success: false, error: chrome.runtime.lastError ? chrome.runtime.lastError.message : "Target tab did not respond." });
+                } else {
+                    sendResponse(res);
+                }
+            });
+        });
+        return true;
     }
     // OPEN GAS SETUP GUIDE IN A PRIVILEGED EXTENSION TAB
     if (req.action === "open_gas_manual") {
